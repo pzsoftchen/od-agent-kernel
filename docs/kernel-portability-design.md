@@ -814,6 +814,14 @@ interface AgentCapabilities {
 └───────────────────────────────────────────────────────┘
     │
     ▼
+┌─ stageSkillFiles(cwd, workflow) ───────────────────────┐
+│                                                         │
+│  复制 workflow.dir 到 cwd/.od-skills/<name>/            │
+│  Agent 可通过相对路径引用附带文件 (模板、规则等)         │
+│                                                         │
+└─────────────────────────────────────────────────────────┘
+    │
+    ▼
 AgentOrchestrator.run({ systemPrompt, userPrompt, cwd, extraDirs })
     │
     │  spawn(claude, ['-p', '--output-format', 'stream-json', ...])
@@ -1253,11 +1261,12 @@ Import 修正清单（12 行）：
 
 | 模块 | 来源 | 说明 |
 |------|------|------|
-| `createChatRouter()` | 重构 `server.ts` 中 `POST /api/chat`（L11243）和 `POST /api/runs`（L10277）的处理逻辑 | 接收 `composePrompt`, `resolveContext`, `resolveWorkflow` 三个领域回调，内部封装 Agent 启动、SSE 流式推送、运行取消、事件回放。~300 行。 |
+| `createChatRouter()` | 重构 `server.ts` 中 `POST /api/chat`（L11243）和 `POST /api/runs`（L10277）的处理逻辑 | 接收 `composePrompt`, `resolveContext`, `resolveWorkflow`, `stageSkillFiles`（可选）四个领域回调，内部封装 Agent 启动、SSE 流式推送、运行取消、事件回放。~300 行。 |
 
-关键设计：`createChatRouter` 内部调用 `orchestrator.run()` 启动 Agent，通过 `runs.stream()` 建立 SSE 连接，通过 `runs.fail()` / `runs.cancel()` 管理生命周期。领域回调只在两个点介入：
+关键设计：`createChatRouter` 内部调用 `orchestrator.run()` 启动 Agent，通过 `runs.stream()` 建立 SSE 连接，通过 `runs.fail()` / `runs.cancel()` 管理生命周期。领域回调在三个点介入：
 1. **运行开始时**：调用 `composePrompt(input)` 组装系统提示
 2. **上下文解析时**：调用 `resolveContext(id)` 和 `resolveWorkflow(id)` 获取领域知识
+3. **Agent 启动前**：调用 `stageSkillFiles(cwd, workflow)` 将工作流附带文件暂存到项目 cwd 下的 `.od-skills/<name>/`，Agent 可通过相对路径直接访问模板、规则等文件
 
 #### `@od-kernel/skill-utils`
 

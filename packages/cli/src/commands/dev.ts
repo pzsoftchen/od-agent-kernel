@@ -1,6 +1,6 @@
 import { createApp, createDaemonRunService, registerHealthRoutes } from '@od-kernel/daemon-core';
 import { createChatRouter, composePrompt } from '@od-kernel/chat-service';
-import { listSkills } from '@od-kernel/skill-utils';
+import { listSkills, stageSkillFiles } from '@od-kernel/skill-utils';
 import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { renderTemplate } from '../template-engine.js';
@@ -79,6 +79,10 @@ export async function devCommand(options: { port?: string }): Promise<void> {
         dir: found.dir,
         requiresContext: true,
       };
+    },
+    stageSkillFiles: async (cwd, workflow) => {
+      const stagedDir = await stageSkillFiles(cwd, { dir: workflow.dir, name: workflow.name });
+      return [stagedDir];
     },
   }));
 

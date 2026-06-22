@@ -18,6 +18,15 @@ export interface ChatRouterOptions {
   composePrompt: DomainPromptComposer['compose'];
   resolveContext: DomainContextResolver;
   resolveWorkflow: DomainWorkflowResolver;
+  /**
+   * Optional: stage workflow sidecar files (references, templates, etc.)
+   * to the project cwd before the agent starts. Called when a workflow is
+   * resolved and its `dir` points to a valid skill directory.
+   *
+   * Returns the list of staged file paths so the caller can pass them as
+   * `extraDirs` or include them in the prompt.
+   */
+  stageSkillFiles?: (cwd: string, workflow: DomainWorkflow) => Promise<string[]>;
 }
 
 export function createChatRouter(options: ChatRouterOptions): Router {
@@ -36,6 +45,22 @@ export function createChatRouter(options: ChatRouterOptions): Router {
       const activeContext = contextId ? await resolveContext.resolve(String(contextId)) : null;
       const activeWorkflow = workflowId ? await resolveWorkflow(String(workflowId)) : null;
 
+      const cwd = String(projectId ?? process.cwd());
+
+      // Stage workflow sidecar files before composing the prompt.
+      // This copies the skill directory contents to cwd/.od-skills/<name>/
+      // so the agent can access templates, rules, and other references.
+      let stagedFiles: string[] = [];
+      if (activeWorkflow && options.stageSkillFiles) {
+        try {
+          stagedFiles = await options.stageSkillFiles(cwd, activeWorkflow);
+        } catch {
+          // Staging failure is non-fatal — the workflow body is still
+          // injected into the prompt. The agent just won't have local
+          // access to the sidecar files.
+        }
+      }
+
       const systemPrompt = compose({
         userPrompt: String(message),
         activeContext,
@@ -43,7 +68,6 @@ export function createChatRouter(options: ChatRouterOptions): Router {
         instructions: instructions ? String(instructions) : undefined,
       });
 
-      const cwd = String(projectId ?? process.cwd());
       const run = runs.create(String(agentId), cwd);
       runs.start(run.id);
 

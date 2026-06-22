@@ -1,5 +1,47 @@
 import { describe, it, expect, vi } from 'vitest';
 import { composePrompt } from '../src/prompt-composer.js';
+import type { DomainWorkflow, ChatRouterOptions } from '../src/chat-handler.js';
+
+describe('ChatRouterOptions type', () => {
+  it('accepts stageSkillFiles as optional callback', () => {
+    const stageFn: NonNullable<ChatRouterOptions['stageSkillFiles']> = async (_cwd, wf) => {
+      return [`/tmp/.od-skills/${wf.name}`];
+    };
+    const opts: ChatRouterOptions = {
+      runs: {} as ChatRouterOptions['runs'],
+      composePrompt: () => 'test',
+      resolveContext: { listAll: async () => [], resolve: async () => null },
+      resolveWorkflow: async () => null,
+      stageSkillFiles: stageFn,
+    };
+    expect(opts.stageSkillFiles).toBeDefined();
+  });
+
+  it('works without stageSkillFiles (optional)', () => {
+    const opts: ChatRouterOptions = {
+      runs: {} as ChatRouterOptions['runs'],
+      composePrompt: () => 'test',
+      resolveContext: { listAll: async () => [], resolve: async () => null },
+      resolveWorkflow: async () => null,
+    };
+    expect(opts.stageSkillFiles).toBeUndefined();
+  });
+});
+
+describe('DomainWorkflow with stageSkillFiles', () => {
+  it('carries dir field needed for file staging', () => {
+    const wf: DomainWorkflow = {
+      id: 'code-review',
+      name: 'Code Review',
+      description: 'Review code',
+      body: '# Steps\n...',
+      dir: '/app/domain/workflows/code-review',
+      requiresContext: true,
+    };
+    // The dir field is what stageSkillFiles uses to locate sidecar files
+    expect(wf.dir).toContain('code-review');
+  });
+});
 
 describe('composePrompt', () => {
   it('composes a basic prompt with user input', () => {

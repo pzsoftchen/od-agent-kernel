@@ -1,0 +1,49 @@
+import { mkdir, writeFile, cp } from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+export async function initCommand(name: string, options: { template?: string }): Promise<void> {
+  const targetDir = path.join(process.cwd(), name);
+  const template = options.template ?? 'minimal';
+
+  // Create directory structure
+  await mkdir(path.join(targetDir, 'domain', 'contexts'), { recursive: true });
+  await mkdir(path.join(targetDir, 'domain', 'workflows'), { recursive: true });
+
+  // Copy template files
+  const templateDir = path.join(__dirname, '..', 'templates', template);
+  try {
+    await cp(templateDir, path.join(targetDir, 'domain'), { recursive: true });
+  } catch {
+    // Template not found — create minimal default
+  }
+
+  // Create domain/prompts.md if not exists
+  const promptsPath = path.join(targetDir, 'domain', 'prompts.md');
+  try {
+    await writeFile(promptsPath, `# Role\nYou are a helpful AI assistant.\n\n# Request\n{{userPrompt}}\n`, { flag: 'wx' });
+  } catch {
+    // Already exists
+  }
+
+  // Create package.json
+  await writeFile(
+    path.join(targetDir, 'package.json'),
+    JSON.stringify(
+      {
+        name,
+        private: true,
+        type: 'module',
+        scripts: { dev: 'od-kernel dev', start: 'od-kernel dev' },
+        dependencies: { '@od-kernel/cli': '^0.1.0' },
+      },
+      null,
+      2,
+    ) + '\n',
+  );
+
+  console.log(`✅ Created ${name}/`);
+  console.log(`   cd ${name} && npx od-kernel dev`);
+}

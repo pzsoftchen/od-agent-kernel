@@ -1,0 +1,1 @@
+{"extends":"../../tsconfig.base.json","compilerOptions":{"outDir":"dist-tests","rootDir":".","emitDeclarationOnly":false,"noEmit":true},"include":["src/**/*.ts","tests/**/*.ts"]}

@@ -1,0 +1,35 @@
+{
+  "name": "@od-kernel/agent-http",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "files": ["dist"],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.mjs"
+    }
+  },
+  "scripts": {
+    "build": "node ./esbuild.config.mjs && tsc -p tsconfig.json --emitDeclarationOnly",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.tests.json --noEmit"
+  },
+  "dependencies": {
+    "@od-kernel/types": "workspace:*"
+  },
+  "peerDependencies": {
+    "express": "^5.0.0 || ^4.21.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/node": "^24.0.0",
+    "@types/supertest": "^6.0.0",
+    "esbuild": "^0.25.0",
+    "express": "^5.0.0 || ^4.21.0",
+    "supertest": "^7.0.0",
+    "typescript": "^5.9.3",
+    "vitest": "^3.1.0"
+  }
+}

@@ -3,7 +3,7 @@ import { build } from "esbuild";
 await build({
   bundle: true,
   entryNames: "[dir]/[name]",
-  entryPoints: ["./src/index.ts"],
+  entryPoints: ["./src/index.ts", "./src/browser-sse.ts"],
   format: "esm",
   outbase: "./src",
   outdir: "./dist",

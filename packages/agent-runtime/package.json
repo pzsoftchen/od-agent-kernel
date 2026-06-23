@@ -19,11 +19,7 @@
   "dependencies": {
     "@od-kernel/types": "workspace:*"
   },
-  "peerDependencies": {
-    "@open-design/platform": "^0.11.0"
-  },
   "devDependencies": {
-    "@open-design/platform": "link:../../packages/platform",
     "@types/node": "^24.0.0",
     "esbuild": "^0.25.0",
     "typescript": "^5.9.3",

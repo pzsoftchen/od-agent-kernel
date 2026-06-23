@@ -5,7 +5,6 @@
 
 import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
-import { createApiError } from '@od-kernel/types';
 
 export type SkillSource = 'built-in' | 'user';
 

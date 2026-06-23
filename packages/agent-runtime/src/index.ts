@@ -66,3 +66,13 @@ export {
 
 // Invocation
 export { execAgentFile, type ExecAgentFileResult } from './invocation.js';
+
+// Orchestrator
+export {
+  createAgentOrchestrator,
+  type AgentOrchestrator,
+  type AgentEvent,
+  type AgentCapabilities,
+  type AgentRunInput,
+  type CreateAgentOrchestratorOptions,
+} from './orchestrator.js';

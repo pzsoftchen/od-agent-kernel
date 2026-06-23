@@ -1,5 +1,6 @@
-import { createApp, createDaemonRunService, registerHealthRoutes } from '@od-kernel/daemon-core';
+import { createApp, createDaemonRunService, registerHealthRoutes, registerAgentRoutes } from '@od-kernel/daemon-core';
 import { createChatRouter, composePrompt } from '@od-kernel/chat-service';
+import { createAgentOrchestrator } from '@od-kernel/agent-runtime';
 import { listSkills, stageSkillFiles } from '@od-kernel/skill-utils';
 import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
@@ -40,7 +41,9 @@ export async function devCommand(options: { port?: string }): Promise<void> {
   // Infrastructure
   const app = createApp();
   const runs = createDaemonRunService();
+  const orchestrator = createAgentOrchestrator();
   registerHealthRoutes(app);
+  registerAgentRoutes(app, orchestrator);
 
   // Context endpoints
   app.get('/api/contexts', (_req, res) => res.json(contexts));
@@ -49,6 +52,7 @@ export async function devCommand(options: { port?: string }): Promise<void> {
   // Chat router
   app.use('/api', createChatRouter({
     runs,
+    orchestrator,
     composePrompt: (input) => {
       if (promptTemplate) {
         return renderTemplate(promptTemplate, {
@@ -86,14 +90,11 @@ export async function devCommand(options: { port?: string }): Promise<void> {
     },
   }));
 
-  // Agent discovery
-  app.get('/api/agents', async (_req, res) => {
-    res.json({ agents: [] }); // Populated when agent-runtime detection is wired
-  });
-
-  app.listen(port, () => {
+  app.listen(port, async () => {
+    const agents = await orchestrator.listAgents();
     console.log(`ready on :${port}`);
     console.log(`  contexts: ${contexts.length} found`);
     console.log(`  workflows: ${workflows.length} found`);
+    console.log(`  agents: ${agents.map(a => a.id).join(', ')}`);
   });
 }

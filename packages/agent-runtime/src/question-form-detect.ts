@@ -35,9 +35,22 @@ export function findQuestionFormCloseTag(text: string): number {
  * Check if a full run's text output emitted a renderable question form.
  * Scans across chunk boundaries by joining all emitted text.
  */
-export function emittedRenderableQuestionForm(
-  textChunks: string[],
-): boolean {
-  const full = textChunks.join('');
-  return questionFormBodyIsRenderable(full);
+export function emittedRenderableQuestionForm(text: unknown): boolean {
+  if (typeof text !== 'string' || !text) return false;
+  let cursor = 0;
+  while (cursor < text.length) {
+    const m = QUESTION_FORM_OPEN_RE.exec(text.slice(cursor));
+    if (!m) return false;
+    const tagEnd = m.index + m[0].length;
+    const body = text.slice(cursor + tagEnd);
+    const closeIdx = findQuestionFormCloseTag(body);
+    if (closeIdx >= 0) {
+      const innerText = body.slice(0, closeIdx);
+      // A question-form is renderable if it has content between tags
+      return innerText.trim().length > 0;
+    }
+    // Open tag found but no close tag — might still be renderable
+    return body.trim().length > 0;
+  }
+  return false;
 }

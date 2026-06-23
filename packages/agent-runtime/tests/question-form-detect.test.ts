@@ -52,17 +52,18 @@ describe('findQuestionFormCloseTag', () => {
 });
 
 describe('emittedRenderableQuestionForm', () => {
-  it('detects form across chunk boundaries', () => {
-    const chunks = [
-      'Some prefix text\n',
-      '<question-form id="q">\n',
-      'form body\n',
-      '</question-form>',
-    ];
-    expect(emittedRenderableQuestionForm(chunks)).toBe(true);
+  it('detects form with closing tag', () => {
+    const text = 'Some prefix\n<question-form id="q">\nform body\n</question-form>';
+    expect(emittedRenderableQuestionForm(text)).toBe(true);
   });
 
-  it('returns false when no form emitted', () => {
-    expect(emittedRenderableQuestionForm(['just text', 'more text'])).toBe(false);
+  it('returns false for plain text', () => {
+    expect(emittedRenderableQuestionForm('just text more text')).toBe(false);
+  });
+
+  it('returns false for empty/undefined input', () => {
+    expect(emittedRenderableQuestionForm('')).toBe(false);
+    expect(emittedRenderableQuestionForm(null)).toBe(false);
+    expect(emittedRenderableQuestionForm(undefined)).toBe(false);
   });
 });

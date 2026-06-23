@@ -63,7 +63,11 @@ export const claudeAgentDef: RuntimeAgentDef = {
       return lines.map((id) => ({ id, label: id }));
     },
   },
-  fetchModels: detectAcpModels,
+  fetchModels: async (_resolvedBin, env) => loadMmdRouteModels(env, [
+    DEFAULT_MODEL_OPTION,
+    { id: 'claude-sonnet-4-6', label: 'Sonnet 4.6' },
+    { id: 'claude-opus-4-8', label: 'Opus 4.8' },
+  ]),
   reasoningOptions: [
     { id: 'low', label: 'Low' },
     { id: 'medium', label: 'Medium' },

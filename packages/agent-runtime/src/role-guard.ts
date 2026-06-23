@@ -13,12 +13,12 @@ export const FABRICATED_ROLE_MARKER_RE =
   /^##\s*(user|assistant|system)\s*$/im;
 
 export interface RoleMarkerGuard {
-  /** Feed raw text chunk into the guard. Returns accumulated clean text. */
-  feedText(chunk: string): string;
-  /** Whether the stream has been contaminated. */
+  /** Feed a text delta for the current message. Returns the safe portion to emit. */
+  feedText(text: string): string;
+  /** Whether a fabricated marker was detected (further text is dropped). */
   readonly contaminated: boolean;
-  /** If contaminated, the warning event to emit. */
-  readonly warningEvent: { type: 'warning'; reason: string } | null;
+  /** If contaminated, the warning event to emit. `null` if clean. */
+  warningEvent(): { type: 'fabricated_role_marker'; marker: string; messageId: string } | null;
 }
 
 export interface CreateRoleMarkerGuardOptions {
@@ -27,8 +27,11 @@ export interface CreateRoleMarkerGuardOptions {
 }
 
 export function createRoleMarkerGuard(
-  options: CreateRoleMarkerGuardOptions = {},
+  options: CreateRoleMarkerGuardOptions | string = {},
 ): RoleMarkerGuard {
+  if (typeof options === 'string') {
+    options = { messageId: options };
+  }
   const messageId = options.messageId ?? '';
   let contaminated = false;
   let accumulated = '';
@@ -38,19 +41,20 @@ export function createRoleMarkerGuard(
       return contaminated;
     },
 
-    get warningEvent() {
+    warningEvent() {
       if (!contaminated) return null;
       return {
-        type: 'warning' as const,
-        reason: `fabricated_role_marker_detected${messageId ? ` for message ${messageId}` : ''}`,
+        type: 'fabricated_role_marker' as const,
+        marker: '## role',
+        messageId,
       };
     },
 
-    feedText(chunk: string): string {
-      if (contaminated) return chunk;
+    feedText(text: string): string {
+      if (contaminated) return text;
 
-      // Check if the accumulated text + new chunk contains a fabricated marker
-      const checkText = accumulated + chunk;
+      // Check if the accumulated text + new text contains a fabricated marker
+      const checkText = accumulated + text;
       if (FABRICATED_ROLE_MARKER_RE.test(checkText)) {
         contaminated = true;
         // Return text up to the marker, truncating the contamination
@@ -64,9 +68,9 @@ export function createRoleMarkerGuard(
       }
 
       // No contamination — accumulate trailing partial match buffer
-      // Keep the last 20 chars to catch markers split across chunks
+      // Keep the last 20 chars to catch markers split across texts
       accumulated = checkText.slice(-20);
-      return chunk;
+      return text;
     },
   };
 

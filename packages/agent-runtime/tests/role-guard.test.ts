@@ -48,10 +48,9 @@ describe('createRoleMarkerGuard', () => {
     const guard = createRoleMarkerGuard();
     guard.feedText('## user\nmore text');
     expect(guard.contaminated).toBe(true);
-    expect(guard.warningEvent).toEqual({
-      type: 'warning',
-      reason: 'fabricated_role_marker_detected',
-    });
+    const event = guard.warningEvent();
+    expect(event).not.toBeNull();
+    expect(event!.type).toBe('fabricated_role_marker');
   });
 
   it('detects contamination split across chunks', () => {
@@ -65,12 +64,13 @@ describe('createRoleMarkerGuard', () => {
   it('includes messageId in warning when provided', () => {
     const guard = createRoleMarkerGuard({ messageId: 'msg-123' });
     guard.feedText('## assistant');
-    expect(guard.warningEvent?.reason).toContain('msg-123');
+    const event = guard.warningEvent();
+    expect(event?.messageId).toBe('msg-123');
   });
 
   it('returns null warningEvent when not contaminated', () => {
     const guard = createRoleMarkerGuard();
-    expect(guard.warningEvent).toBeNull();
+    expect(guard.warningEvent()).toBeNull();
   });
 
   it('continues passing text through after contamination', () => {

@@ -15,7 +15,10 @@ export function sanitizeCustomModel(id: string | null | undefined): string | nul
   if (typeof id !== 'string') return null;
   const trimmed = id.trim();
   if (trimmed.length === 0 || trimmed.length > 256) return null;
-  // Reject ids that look like path traversal
   if (trimmed.includes('/') || trimmed.includes('\\') || trimmed.includes('..')) return null;
   return trimmed;
 }
+
+// Stubs for live model caching — not used in standalone kernel
+export function getRememberedLiveModels(_agentId: string, _scope?: string): RuntimeModelOption[] | null { return null; }
+export function rememberLiveModels(_agentId: string, _models: RuntimeModelOption[], _scope?: string): void {}

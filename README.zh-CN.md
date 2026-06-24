@@ -46,7 +46,6 @@ Agent 编排内核（`@od-kernel/*`）是从 [Open Design](https://github.com/ne
 ├──────────────────────────────────────────────────────────┤
 │                     基础层                                │
 │  @od-kernel/types           共享错误码 + Agent 类型        │
-│  @open-design/platform      OS 进程原语（外部依赖）        │
 └──────────────────────────────────────────────────────────┘
 ```
 
@@ -56,16 +55,15 @@ Agent 编排内核（`@od-kernel/*`）是从 [Open Design](https://github.com/ne
 @od-kernel/types  (零依赖)
     ↑
 @od-kernel/agent-http  → types + express (peer)
+@od-kernel/agent-runtime  → types
     ↑
-@od-kernel/agent-runtime  → types + @open-design/platform (外部)
-    ↑
-@od-kernel/daemon-core  → types + agent-http + express (peer)
+@od-kernel/daemon-core  → agent-runtime + types + express (peer)
     ↑
 @od-kernel/chat-service  → daemon-core + agent-runtime + types
     ↑
-@od-kernel/cli  → chat-service + daemon-core + agent-runtime + skill-utils
+@od-kernel/cli  → chat-service + daemon-core + agent-runtime + skill-utils + types
 
-@od-kernel/skill-utils  → types (独立)
+@od-kernel/skill-utils  (零运行时依赖 — 独立)
 @od-kernel/project-service  → types + better-sqlite3 (独立，可选)
 ```
 
@@ -75,14 +73,14 @@ Agent 编排内核（`@od-kernel/*`）是从 [Open Design](https://github.com/ne
 
 | 包名 | 描述 | 状态 |
 |------|------|------|
-| `@od-kernel/types` | 共享错误码、Agent 诊断类型、HTTP 路由类型（~120 行） | ✅ |
-| `@od-kernel/agent-http` | 类型安全的 JSON 路由框架 — `Result<T,E>`、`defineJsonRoute`、`mountJsonRoute` | ✅ |
-| `@od-kernel/agent-runtime` | Agent 检测、启动、流解析、运行生命周期，支持 24+ Agent | ✅ |
-| `@od-kernel/daemon-core` | Express 应用工厂、SSE 响应工具、健康检查/Agent 路由 | ✅ |
-| `@od-kernel/chat-service` | 参数化 Chat 处理器，可插拔领域回调 | ✅ |
-| `@od-kernel/skill-utils` | 多 root SKILL.md 扫描、YAML frontmatter 解析、文件暂存 | ✅ |
-| `@od-kernel/project-service` | 基于 SQLite 的项目 CRUD（可选） | ✅ |
-| `@od-kernel/cli` | npx CLI — `init`、`dev`、`add` 命令 + Mustache 模板引擎 | ✅ |
+| `@od-kernel/types` | 共享错误码（27 种）、Agent 诊断类型、HTTP 路由类型（`Result<T,E>`、`JsonRouteSpec`） | ✅ |
+| `@od-kernel/agent-http` | 类型安全的 JSON 路由框架 — `defineJsonRoute`、`mountJsonRoute`、同源守卫 | ✅ |
+| `@od-kernel/agent-runtime` | Agent 检测、启动、流解析（Claude/Qoder/JSON）、运行生命周期、ACP + Pi-RPC 协议、24 个 Agent 定义 | ✅ |
+| `@od-kernel/daemon-core` | Express 应用工厂（认证/CORS/CSP）、SSE 响应工具、健康检查/Agent 路由 | ✅ |
+| `@od-kernel/chat-service` | 参数化 Chat 处理器（领域回调）、BYOK 代理、提示组装器、Trigger 自动匹配 | ✅ |
+| `@od-kernel/skill-utils` | 多 root SKILL.md 扫描、YAML frontmatter 解析、文件暂存、Trigger 匹配（子串/正则/关键词） | ✅ |
+| `@od-kernel/project-service` | 基于 SQLite 的项目 CRUD（自动建表、预编译 SQL） | ✅ |
+| `@od-kernel/cli` | npx CLI — `init`、`dev`、`add`、`agents`、`templates` 命令 + 增强 Mustache 模板引擎 | ✅ |
 
 ---
 
@@ -111,11 +109,18 @@ npx @od-kernel/cli dev
 # → 自动发现: 1 context, 1 workflow
 # → Agent: claude (available), copilot (available)
 
-# 4. 验证
+# 4. 验证 — 显式指定工作流
 curl http://localhost:7456/api/agents
 curl -N -X POST http://localhost:7456/api/chat \
   -H "Content-Type: application/json" \
   -d '{"agentId":"claude","message":"审查 src/auth.ts","contextId":"security-audit","workflowId":"code-review"}'
+
+# 5. 或者让系统根据消息自动匹配工作流
+# code-review 工作流定义了 triggers: [review, code review, security audit, ...]
+curl -N -X POST http://localhost:7456/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{"agentId":"claude","message":"请审查 auth 模块的安全问题"}'
+# → 工作流 "code-review" 自动通过 trigger 匹配选中
 ```
 
 ### 方式 B：手动组装（高级 — 完全控制）
@@ -123,8 +128,7 @@ curl -N -X POST http://localhost:7456/api/chat \
 ```bash
 pnpm add @od-kernel/daemon-core @od-kernel/chat-service \
          @od-kernel/agent-runtime @od-kernel/skill-utils \
-         @od-kernel/types @open-design/platform \
-         express better-sqlite3
+         @od-kernel/types express better-sqlite3
 ```
 
 然后编写 `src/server.ts`（约 60 行胶水代码）— 完整示例见[设计文档](./docs/kernel-portability-design.md)。
@@ -138,10 +142,123 @@ npx @od-kernel/cli add workflow contract-review
 # → 编辑生成的 Markdown 文件，重启 dev server 即可
 
 # 手动方式
-# 1. domain/prompts.ts     ← 定义角色 + 提示组装逻辑（~30 行 TS）
-# 2. domain/contexts/       ← 放入 CONTEXT.md 文件（纯 Markdown）
-# 3. domain/workflows/      ← 放入 SKILL.md 文件（纯 Markdown）
-# 然后修改 src/server.ts 中的 3 个 import 路径
+# 1. domain/prompts.md      ← 定义角色 + 提示模板（纯 Markdown）
+# 2. domain/contexts/        ← 放入 CONTEXT.md 文件（纯 Markdown）
+# 3. domain/workflows/       ← 放入 SKILL.md 文件（纯 Markdown）
+#    添加 triggers: [contract, legal, agreement] 实现自动匹配
+```
+
+---
+
+## 核心功能
+
+### 模板引擎
+
+`prompts.md` 中的 Mustache 风格模板引擎支持：
+
+| 语法 | 说明 | 示例 |
+|------|------|------|
+| `{{var}}` | 简单变量替换 | `{{userPrompt}}` |
+| `{{var:-default}}` | 带默认值的变量 | `{{role:-helpful assistant}}` |
+| `{{#key}}...{{/key}}` | 条件块（为真时渲染） | `{{#instructions}}规则：{{instructions}}{{/instructions}}` |
+| `{{^key}}...{{/key}}` | 反向条件块（为假时渲染） | `{{^instructions}}无特殊要求。{{/instructions}}` |
+| `{{#each key}}...{{/each}}` | 循环迭代 | `{{#each files}}- {{this}}\n{{/each}}` |
+| `{{this}}` / `{{this.prop}}` | 循环上下文访问 | `#each` 中的当前项 |
+
+块支持任意嵌套。
+
+### 工作流 Trigger 自动匹配
+
+SKILL.md 文件可以在 YAML frontmatter 中声明 `triggers`：
+
+```yaml
+---
+name: code-review
+description: 安全代码审查
+triggers: [审查, code review, 安全检查, /审查\|审计/i, kw:审查,检查]
+---
+```
+
+支持三种 trigger 匹配模式：
+- **子串匹配**（默认）：`"审查"` 匹配任意包含"审查"的消息（不区分大小写）
+- **正则匹配**：`"/审查|审计/i"` 匹配包含"审查"或"审计"的消息
+- **关键词匹配**（`kw:`）：`"kw:审查,检查"` 仅匹配完整单词（不匹配"审"这类子串）
+
+当用户发送消息但未显式指定 `workflowId` 时，系统会自动检查所有工作流的 triggers 并选中第一个匹配项。详见 `@od-kernel/skill-utils` 的 `matchTrigger()` 和 `findMatchingWorkflow()`。
+
+### BYOK 代理
+
+自带 API Key，通过支持的 provider 直接路由：
+
+```
+POST /api/proxy/claude/stream       → 路由到 Claude Code agent
+POST /api/proxy/opencode/stream     → 路由到 OpenCode agent
+POST /api/proxy/codex/stream        → 路由到 Codex agent
+POST /api/proxy/deepseek/stream     → 路由到 DeepSeek agent
+```
+
+内置 provider→agent 映射：`claude`、`opencode`、`codex`、`gemini`、`qwen`、`deepseek`、`copilot`、`cursor`。可通过 `ChatRouterOptions.providerAgentMap` 添加自定义映射。
+
+---
+
+## API 接口
+
+### REST 端点
+
+```
+# 健康检查 & 元信息
+GET  /api/health
+GET  /api/version
+GET  /api/ready
+
+# Agent 发现
+GET  /api/agents
+POST /api/agents/:id/launch-terminal    # 启动 Agent 进行交互式 OAuth
+
+# 核心 Chat
+POST /api/chat              → SSE       # 组装提示 → 启动 Agent → SSE 流
+POST /api/runs                          # 创建运行（MCP/SDK 风格，无 SSE）
+POST /api/proxy/:provider/stream → SSE  # BYOK 代理直连
+
+# 运行管理
+GET  /api/runs                           # 运行列表
+GET  /api/runs/:id                       # 运行状态
+GET  /api/runs/:id/events   → SSE       # 运行事件回放
+POST /api/runs/:id/cancel                # 取消运行
+
+# 领域发现（dev server 自动从 domain/ 发现）
+GET  /api/contexts                        # 领域上下文列表
+GET  /api/workflows                       # 领域工作流列表
+
+# 项目管理（挂载 project-service 时可用）
+GET    /api/projects                      # 项目列表
+POST   /api/projects                      # 创建项目
+GET    /api/projects/:id                  # 获取项目
+PATCH  /api/projects/:id                  # 更新项目
+DELETE /api/projects/:id                  # 删除项目
+GET    /api/projects/:id/files            # 项目文件列表
+```
+
+### SSE 事件类型
+
+```
+event: start    → { runId, agentId, bin, cwd, model? }
+event: agent    → { type: "text_delta"|"thinking_delta"|"tool_use"|"tool_result"|"file_write"|"usage", ... }
+event: error    → { message, error? }
+event: end      → { code, signal?, status?, resumable? }
+```
+
+### 浏览器端 SSE 消费
+
+```typescript
+import { parseSseStream } from '@od-kernel/chat-service/browser';
+
+const response = await fetch('/api/chat', { method: 'POST', ... });
+for await (const event of parseSseStream(response)) {
+  if (event.type === 'agent' && event.payload.type === 'text_delta') {
+    appendToChat(event.payload.text);
+  }
+}
 ```
 
 ---
@@ -167,7 +284,7 @@ pnpm -r build       # 同上
 
 ```bash
 pnpm test           # 运行全部测试（vitest）
-# 当前：124 项测试通过，覆盖 16 个测试文件
+# 当前：253 项测试通过，覆盖 17 个测试文件
 ```
 
 ### 类型检查
@@ -192,6 +309,7 @@ kernel/
 ├── tsconfig.base.json        # 共享 TypeScript 配置
 ├── README.md                 # 英文文档
 ├── README.zh-CN.md           # 中文文档（本文件）
+├── CLAUDE.md                 # AI 助手用架构文档
 ├── docs/                     # 设计文档
 └── packages/
     ├── types/                # @od-kernel/types
@@ -206,57 +324,16 @@ kernel/
 
 ---
 
-## API 接口
-
-### REST 端点（由 daemon-core + chat-service 提供）
-
-```
-GET  /api/health                          # 健康检查
-GET  /api/version                         # 版本信息
-GET  /api/agents                          # Agent 列表 + 能力位图
-GET  /api/contexts                        # 领域上下文列表
-GET  /api/workflows                       # 领域工作流列表
-POST /api/chat              → SSE        # 核心：组装提示 → 启动 Agent → SSE 流
-GET  /api/runs/:id/events   → SSE        # 运行事件回放
-POST /api/runs/:id/cancel                 # 取消运行
-GET  /api/runs                            # 运行列表
-GET  /api/runs/:id                        # 运行状态
-```
-
-### SSE 事件类型
-
-```
-event: start    → { runId, agentId, bin, cwd, model? }
-event: agent    → { type: "text_delta"|"thinking_delta"|"tool_use"|"tool_result"|"usage", ... }
-event: error    → { message, error? }
-event: end      → { code, signal?, status?, resumable? }
-```
-
-### 浏览器端 SSE 消费
-
-```typescript
-import { parseSseStream } from '@od-kernel/chat-service/browser';
-
-const response = await fetch('/api/chat', { method: 'POST', ... });
-for await (const event of parseSseStream(response)) {
-  if (event.type === 'agent' && event.payload.type === 'text_delta') {
-    appendToChat(event.payload.text);
-  }
-}
-```
-
----
-
 ## 测试体系
 
 项目使用 [Vitest](https://vitest.dev/) 进行四层测试：
 
 | 层级 | 描述 | 覆盖的包 |
 |------|------|---------|
-| **单元测试** | 独立函数（解析器、守卫、工具函数） | 全部包 |
+| **单元测试** | 独立函数（解析器、守卫、工具函数、Trigger 匹配） | 全部包 |
 | **集成测试** | Express 路由挂载、SSE 生命周期 | agent-http、daemon-core |
-| **契约测试** | 3 个模拟领域的回调正确性验证 | chat-service |
-| **E2E 测试** | 使用 Mock Agent 的完整 SSE 流验证 | cli |
+| **契约测试** | 领域回调正确性、模板引擎渲染验证 | chat-service、cli |
+| **结构测试** | 全部 24 个 Agent 定义的字段完整性验证 | agent-runtime |
 
 覆盖的关键回归场景：
 - Agent 检测超时处理
@@ -264,6 +341,8 @@ for await (const event of parseSseStream(response)) {
 - Claude 流中的角色标记污染截断
 - 跨域请求拒绝
 - SSE keepalive 心跳连续性
+- 模板引擎嵌套块、循环、默认值、反向条件
+- Trigger 匹配：子串、正则、关键词三种模式
 
 ---
 
@@ -274,14 +353,14 @@ for await (const event of parseSseStream(response)) {
 | 文件 | 原始设计依赖 | 剥离策略 |
 |------|-------------|---------|
 | `runs.ts` | `media/policy`、`run-tool-bundle`、`workspace-contract` | 通过 `MediaPolicyDeps` 注入 |
-| `env.ts` | `app-config`、`home-expansion`、`vela-profile`、`project-root`、`sandbox-mode` | 通过 `AppConfigDeps` + `AmrIntegrationDeps` + `SandboxConfigDeps` 注入 |
+| `env.ts` | `app-config`、`home-expansion`、`vela-profile`、`project-root`、`sandbox-mode` | 通过 `AppConfigDeps` + `AmrIntegrationDeps` + `SandboxConfigDeps` 注入；Agent 专属逻辑移至各 Agent 定义的 `spawnEnvCustomizer` |
 | `executables.ts` | `sandbox-mode` | 通过 `SandboxConfigDeps` 注入 |
 | `detection.ts` | `integrations/vela` | 通过 `AmrIntegrationDeps` 注入 |
 | `claude-stream.ts` | `role-marker-guard` | 复制到内核（通用工具） |
 | `run-artifacts.ts` | `question-form-detect` | 复制到内核（通用工具） |
 | `local-profiles.ts` | `sandbox-mode` | 通过 `SandboxConfigDeps` 注入 |
 
-所有注入点均为可选 — 内核提供无操作（no-op）默认实现，开箱即用，无需任何设计专属配置。
+所有注入点均为可选 — 内核提供无操作（no-op）默认实现，开箱即用，无需任何设计专属配置。Stub 文件（`platform-stub.ts`、`sandbox-stub.ts`、`vela-profile-stub.ts`、`app-config-stub.ts`）提供最小化的独立运行行为。
 
 ---
 
@@ -316,6 +395,11 @@ Apache-2.0 © Open Design Contributors
 - Import 路径调整为独立包内引用。
 - 从共享类型定义中裁剪了设计专属的错误码。
 - 7 个设计耦合的文件通过依赖注入接口进行了参数化。
+- `env.ts` 中的硬编码 Agent ID 分支替换为多态 `spawnEnvCustomizer`。
+- 6 个瘦 Agent 定义（kilo、kiro、vibe、qwen、kimi、trae-cli）补全了完整元数据。
+- 模板引擎增强：支持嵌套块、循环、默认值和反向条件。
+- 工作流 Trigger 自动匹配（子串、正则、关键词三种模式）。
+- BYOK 代理扩展为可配置的 provider→agent 映射。
 
 ---
 

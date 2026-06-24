@@ -46,7 +46,6 @@ The Agent Orchestration Kernel (`@od-kernel/*`) is a layered npm package archite
 ├──────────────────────────────────────────────────────────┤
 │                    Base Layer                             │
 │  @od-kernel/types          Shared error + agent types     │
-│  @open-design/platform     OS process primitives (external)│
 └──────────────────────────────────────────────────────────┘
 ```
 
@@ -56,16 +55,15 @@ The Agent Orchestration Kernel (`@od-kernel/*`) is a layered npm package archite
 @od-kernel/types  (zero deps)
     ↑
 @od-kernel/agent-http  → types + express (peer)
+@od-kernel/agent-runtime  → types
     ↑
-@od-kernel/agent-runtime  → types + @open-design/platform (external)
-    ↑
-@od-kernel/daemon-core  → types + agent-http + express (peer)
+@od-kernel/daemon-core  → agent-runtime + types + express (peer)
     ↑
 @od-kernel/chat-service  → daemon-core + agent-runtime + types
     ↑
-@od-kernel/cli  → chat-service + daemon-core + agent-runtime + skill-utils
+@od-kernel/cli  → chat-service + daemon-core + agent-runtime + skill-utils + types
 
-@od-kernel/skill-utils  → types (standalone)
+@od-kernel/skill-utils  (zero runtime deps — standalone)
 @od-kernel/project-service  → types + better-sqlite3 (standalone, optional)
 ```
 
@@ -75,14 +73,14 @@ The Agent Orchestration Kernel (`@od-kernel/*`) is a layered npm package archite
 
 | Package | Description | Status |
 |---------|-------------|--------|
-| `@od-kernel/types` | Shared error codes, agent diagnostic types, HTTP route types (~120 lines) | ✅ |
-| `@od-kernel/agent-http` | Type-safe JSON route framework — `Result<T,E>`, `defineJsonRoute`, `mountJsonRoute` | ✅ |
-| `@od-kernel/agent-runtime` | Agent detection, launch, stream parsing, run lifecycle for 24+ agents | ✅ |
-| `@od-kernel/daemon-core` | Express app factory, SSE response helpers, health/agent routes | ✅ |
-| `@od-kernel/chat-service` | Parameterized chat handler with pluggable domain callbacks | ✅ |
-| `@od-kernel/skill-utils` | Multi-root SKILL.md scanner, YAML frontmatter parser, file staging | ✅ |
-| `@od-kernel/project-service` | Optional SQLite-backed project CRUD | ✅ |
-| `@od-kernel/cli` | npx CLI — `init`, `dev`, `add` commands + Mustache template engine | ✅ |
+| `@od-kernel/types` | Shared error codes (27 codes), agent diagnostic types, HTTP route types (`Result<T,E>`, `JsonRouteSpec`) | ✅ |
+| `@od-kernel/agent-http` | Type-safe JSON route framework — `defineJsonRoute`, `mountJsonRoute`, same-origin guard | ✅ |
+| `@od-kernel/agent-runtime` | Agent detection, launch, stream parsing (Claude/Qoder/JSON), run lifecycle, ACP + Pi-RPC protocols, 24 agent definitions | ✅ |
+| `@od-kernel/daemon-core` | Express app factory (auth/CORS/CSP), SSE response helpers, health/agent routes | ✅ |
+| `@od-kernel/chat-service` | Parameterized chat handler with domain callbacks, BYOK proxy, prompt composer, trigger auto-matching | ✅ |
+| `@od-kernel/skill-utils` | Multi-root SKILL.md scanner, YAML frontmatter parser, file staging, trigger matching (substring/regex/keyword) | ✅ |
+| `@od-kernel/project-service` | Optional SQLite-backed project CRUD (auto-creates schema, prepared statements) | ✅ |
+| `@od-kernel/cli` | npx CLI — `init`, `dev`, `add`, `agents`, `templates` commands + enhanced Mustache template engine | ✅ |
 
 ---
 
@@ -111,11 +109,18 @@ npx @od-kernel/cli dev
 # → auto-discovered: 1 context, 1 workflow
 # → agents: claude (available), copilot (available)
 
-# 4. Verify
+# 4. Verify — explicit workflow selection
 curl http://localhost:7456/api/agents
 curl -N -X POST http://localhost:7456/api/chat \
   -H "Content-Type: application/json" \
   -d '{"agentId":"claude","message":"Review src/auth.ts","contextId":"security-audit","workflowId":"code-review"}'
+
+# 5. Or let the system auto-match the workflow from your message
+# The code-review workflow has triggers: [review, code review, security audit, ...]
+curl -N -X POST http://localhost:7456/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{"agentId":"claude","message":"Please review the auth module for security issues"}'
+# → workflow "code-review" is auto-selected via trigger matching
 ```
 
 ### Option B: Manual Assembly (advanced — full control)
@@ -123,8 +128,7 @@ curl -N -X POST http://localhost:7456/api/chat \
 ```bash
 pnpm add @od-kernel/daemon-core @od-kernel/chat-service \
          @od-kernel/agent-runtime @od-kernel/skill-utils \
-         @od-kernel/types @open-design/platform \
-         express better-sqlite3
+         @od-kernel/types express better-sqlite3
 ```
 
 Then write `src/server.ts` (~60 lines of glue code) — see the [design document](./docs/kernel-portability-design.md) for a complete example.
@@ -138,10 +142,123 @@ npx @od-kernel/cli add workflow contract-review
 # → Edit the generated Markdown files, restart dev server — done.
 
 # Manual way
-# 1. domain/prompts.ts     ← define the role + prompt assembly (~30 lines TS)
-# 2. domain/contexts/       ← drop in CONTEXT.md files (pure Markdown)
-# 3. domain/workflows/      ← drop in SKILL.md files (pure Markdown)
-# Then update 3 import paths in src/server.ts.
+# 1. domain/prompts.md      ← define the role + prompt template (pure Markdown)
+# 2. domain/contexts/        ← drop in CONTEXT.md files (pure Markdown)
+# 3. domain/workflows/       ← drop in SKILL.md files (pure Markdown)
+#    Add triggers: [contract, legal, agreement] for auto-matching.
+```
+
+---
+
+## Key Features
+
+### Template Engine
+
+The Mustache-style template engine in `prompts.md` supports:
+
+| Syntax | Description | Example |
+|--------|-------------|---------|
+| `{{var}}` | Simple substitution | `{{userPrompt}}` |
+| `{{var:-default}}` | Default value | `{{role:-helpful assistant}}` |
+| `{{#key}}...{{/key}}` | Conditional block (truthy) | `{{#instructions}}Rules: {{instructions}}{{/instructions}}` |
+| `{{^key}}...{{/key}}` | Inverted block (falsy) | `{{^instructions}}No special requirements.{{/instructions}}` |
+| `{{#each key}}...{{/each}}` | Iteration | `{{#each files}}- {{this}}\n{{/each}}` |
+| `{{this}}` / `{{this.prop}}` | Loop context access | Current item in `#each` |
+
+Blocks can be nested arbitrarily.
+
+### Workflow Trigger Auto-Matching
+
+SKILL.md files can declare `triggers` in their YAML frontmatter:
+
+```yaml
+---
+name: code-review
+description: Security-focused code review
+triggers: [review, code review, security audit, /audit|review/i, kw:review,check]
+---
+```
+
+Three trigger modes are supported:
+- **Substring** (default): `"review"` matches any message containing "review" (case-insensitive)
+- **Regex**: `"/review|audit/i"` matches messages with "review" or "audit"
+- **Keyword** (`kw:`): `"kw:review,audit"` matches whole words only (not "preview")
+
+When a user sends a message without an explicit `workflowId`, the system checks all workflows' triggers and auto-selects the first match. See `@od-kernel/skill-utils` `matchTrigger()` and `findMatchingWorkflow()`.
+
+### BYOK Proxy
+
+Bring your own API key and route through any supported provider:
+
+```
+POST /api/proxy/claude/stream       → routes to Claude Code agent
+POST /api/proxy/opencode/stream     → routes to OpenCode agent
+POST /api/proxy/codex/stream        → routes to Codex agent
+POST /api/proxy/deepseek/stream     → routes to DeepSeek agent
+```
+
+Built-in provider→agent mappings: `claude`, `opencode`, `codex`, `gemini`, `qwen`, `deepseek`, `copilot`, `cursor`. Custom mappings can be added via `ChatRouterOptions.providerAgentMap`.
+
+---
+
+## API Surface
+
+### REST Endpoints
+
+```
+# Health & Meta
+GET  /api/health
+GET  /api/version
+GET  /api/ready
+
+# Agent Discovery
+GET  /api/agents
+POST /api/agents/:id/launch-terminal    # Launch agent for interactive OAuth
+
+# Core Chat
+POST /api/chat              → SSE       # Assemble prompt → launch agent → SSE stream
+POST /api/runs                          # Create a run (MCP/SDK style, no SSE)
+POST /api/proxy/:provider/stream → SSE  # BYOK proxy for direct provider access
+
+# Run Management
+GET  /api/runs                           # List all runs
+GET  /api/runs/:id                       # Get run status
+GET  /api/runs/:id/events   → SSE       # Replay run events
+POST /api/runs/:id/cancel                # Cancel a running run
+
+# Domain Discovery (dev server auto-discovers from domain/)
+GET  /api/contexts                        # List domain contexts
+GET  /api/workflows                       # List domain workflows
+
+# Project Management (when project-service is mounted)
+GET    /api/projects                      # List projects
+POST   /api/projects                      # Create project
+GET    /api/projects/:id                  # Get project
+PATCH  /api/projects/:id                  # Update project
+DELETE /api/projects/:id                  # Delete project
+GET    /api/projects/:id/files            # List project files
+```
+
+### SSE Events
+
+```
+event: start    → { runId, agentId, bin, cwd, model? }
+event: agent    → { type: "text_delta"|"thinking_delta"|"tool_use"|"tool_result"|"file_write"|"usage", ... }
+event: error    → { message, error? }
+event: end      → { code, signal?, status?, resumable? }
+```
+
+### Browser-Side SSE Consumption
+
+```typescript
+import { parseSseStream } from '@od-kernel/chat-service/browser';
+
+const response = await fetch('/api/chat', { method: 'POST', ... });
+for await (const event of parseSseStream(response)) {
+  if (event.type === 'agent' && event.payload.type === 'text_delta') {
+    appendToChat(event.payload.text);
+  }
+}
 ```
 
 ---
@@ -167,7 +284,7 @@ pnpm -r build       # Same as above
 
 ```bash
 pnpm test           # Run all tests (vitest)
-# Currently: 124 tests passing across 16 test files
+# Currently: 253 tests passing across 17 test files
 ```
 
 ### Type Check
@@ -192,6 +309,7 @@ kernel/
 ├── tsconfig.base.json        # Shared TypeScript config
 ├── README.md                 # This file
 ├── README.zh-CN.md           # Chinese documentation
+├── CLAUDE.md                 # Architecture docs for AI assistants
 ├── docs/                     # Design documents
 └── packages/
     ├── types/                # @od-kernel/types
@@ -206,57 +324,16 @@ kernel/
 
 ---
 
-## API Surface
-
-### REST Endpoints (provided by daemon-core + chat-service)
-
-```
-GET  /api/health                          # Health check
-GET  /api/version                         # Version info
-GET  /api/agents                          # Agent list + capabilities
-GET  /api/contexts                        # Domain contexts
-GET  /api/workflows                       # Domain workflows
-POST /api/chat              → SSE        # Core: assemble prompt → launch agent → SSE stream
-GET  /api/runs/:id/events   → SSE        # Run event replay
-POST /api/runs/:id/cancel                 # Cancel a run
-GET  /api/runs                            # Run list
-GET  /api/runs/:id                        # Run status
-```
-
-### SSE Events
-
-```
-event: start    → { runId, agentId, bin, cwd, model? }
-event: agent    → { type: "text_delta"|"thinking_delta"|"tool_use"|"tool_result"|"usage", ... }
-event: error    → { message, error? }
-event: end      → { code, signal?, status?, resumable? }
-```
-
-### Browser-Side SSE Consumption
-
-```typescript
-import { parseSseStream } from '@od-kernel/chat-service/browser';
-
-const response = await fetch('/api/chat', { method: 'POST', ... });
-for await (const event of parseSseStream(response)) {
-  if (event.type === 'agent' && event.payload.type === 'text_delta') {
-    appendToChat(event.payload.text);
-  }
-}
-```
-
----
-
 ## Testing
 
 The project uses [Vitest](https://vitest.dev/) for testing across four layers:
 
 | Layer | Description | Packages Covered |
 |-------|-------------|-----------------|
-| **Unit** | Individual functions (parsers, guards, helpers) | All packages |
+| **Unit** | Individual functions (parsers, guards, helpers, trigger matching) | All packages |
 | **Integration** | Express route mounting, SSE lifecycle | agent-http, daemon-core |
-| **Contract** | Domain callback correctness across 3 simulated domains | chat-service |
-| **E2E** | Full SSE stream validation with mock agents | cli |
+| **Contract** | Domain callback correctness, template engine rendering | chat-service, cli |
+| **Structural** | Agent definition field validation across all 24 agents | agent-runtime |
 
 Key regression scenarios covered:
 - Agent detection timeout handling
@@ -264,6 +341,8 @@ Key regression scenarios covered:
 - Role marker contamination cut-off in Claude streams
 - Cross-origin request rejection
 - SSE keepalive heartbeat continuity
+- Template engine nested blocks, loops, defaults, inverted conditions
+- Trigger matching: substring, regex, and keyword modes
 
 ---
 
@@ -274,14 +353,14 @@ The kernel was extracted from Open Design's monorepo. Seven files in the agent r
 | File | Original Design Deps | Stripping Strategy |
 |------|---------------------|-------------------|
 | `runs.ts` | `media/policy`, `run-tool-bundle`, `workspace-contract` | Injected via `MediaPolicyDeps` |
-| `env.ts` | `app-config`, `home-expansion`, `vela-profile`, `project-root`, `sandbox-mode` | Injected via `AppConfigDeps` + `AmrIntegrationDeps` + `SandboxConfigDeps` |
+| `env.ts` | `app-config`, `home-expansion`, `vela-profile`, `project-root`, `sandbox-mode` | Injected via `AppConfigDeps` + `AmrIntegrationDeps` + `SandboxConfigDeps`; agent-specific logic moved to `spawnEnvCustomizer` on each agent def |
 | `executables.ts` | `sandbox-mode` | Injected via `SandboxConfigDeps` |
 | `detection.ts` | `integrations/vela` | Injected via `AmrIntegrationDeps` |
 | `claude-stream.ts` | `role-marker-guard` | Copied into kernel (general-purpose utility) |
 | `run-artifacts.ts` | `question-form-detect` | Copied into kernel (general-purpose utility) |
 | `local-profiles.ts` | `sandbox-mode` | Injected via `SandboxConfigDeps` |
 
-All injection points are optional — the kernel ships with no-op defaults so it works out of the box without any design-specific configuration.
+All injection points are optional — the kernel ships with no-op defaults so it works out of the box without any design-specific configuration. Stub files (`platform-stub.ts`, `sandbox-stub.ts`, `vela-profile-stub.ts`, `app-config-stub.ts`) provide minimal standalone behavior.
 
 ---
 
@@ -316,6 +395,11 @@ Modifications from the original:
 - Import paths adjusted to resolve within standalone packages.
 - Design-specific error codes trimmed from the shared type definitions.
 - Seven design-coupled files parameterized with dependency injection interfaces.
+- Hardcoded agent ID branches in `env.ts` replaced with polymorphic `spawnEnvCustomizer`.
+- Six thin agent definitions (kilo, kiro, vibe, qwen, kimi, trae-cli) completed with full metadata.
+- Template engine enhanced with nested blocks, loops, defaults, and inverted conditions.
+- Workflow trigger auto-matching added (substring, regex, keyword modes).
+- BYOK proxy expanded with configurable provider→agent mapping.
 
 ---
 

@@ -146,7 +146,7 @@ export function createAgentOrchestrator(
         ...configuredEnv,
       };
       const env = applyAgentLaunchEnv(
-        spawnEnvForAgent(def.id, baseEnv, configuredEnv),
+        spawnEnvForAgent(def.id, baseEnv, configuredEnv, undefined, {}, def),
         launch,
       );
 

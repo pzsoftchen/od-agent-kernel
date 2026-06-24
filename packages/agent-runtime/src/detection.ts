@@ -214,6 +214,7 @@ async function probe(
       configuredEnv,
       undefined,
       { resolvedBin: launch.selectedPath },
+      def,
     ),
     launch,
   );

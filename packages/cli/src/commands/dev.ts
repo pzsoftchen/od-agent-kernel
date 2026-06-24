@@ -1,7 +1,7 @@
 import { createApp, createDaemonRunService, registerHealthRoutes, registerAgentRoutes } from '@od-kernel/daemon-core';
 import { createChatRouter, composePrompt } from '@od-kernel/chat-service';
 import { createAgentOrchestrator } from '@od-kernel/agent-runtime';
-import { listSkills, stageSkillFiles } from '@od-kernel/skill-utils';
+import { listSkills, stageSkillFiles, findMatchingWorkflow } from '@od-kernel/skill-utils';
 import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { renderTemplate } from '../template-engine.js';
@@ -87,6 +87,14 @@ export async function devCommand(options: { port?: string }): Promise<void> {
     stageSkillFiles: async (cwd, workflow) => {
       const stagedDir = await stageSkillFiles(cwd, { dir: workflow.dir, name: workflow.name });
       return [stagedDir];
+    },
+    // Auto-match workflows based on trigger keywords in the user's message.
+    // When a user says "review this code" and a workflow has trigger "review",
+    // that workflow is automatically selected without explicit workflowId.
+    autoMatchWorkflow: async (message: string) => {
+      const skills = await listSkills([path.join(domainDir, 'workflows')]);
+      const matched = findMatchingWorkflow(skills, message);
+      return matched?.id ?? null;
     },
   }));
 

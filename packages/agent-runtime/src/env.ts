@@ -68,12 +68,93 @@ function amrAnalyticsIdentityEnv(
   return { OD_INSTALLATION_ID: installationId };
 }
 
+/**
+ * AMR (Vela) spawn environment customizer.
+ * Injects Vela profile env, analytics identity, HOME backfill,
+ * client-source tagging, OpenCode test home, and OpenCode binary resolution.
+ */
+export function customizeAmrSpawnEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  Object.assign(env, amrVelaProfileEnv(env));
+  Object.assign(env, amrAnalyticsIdentityEnv(env));
+  // `execAgentFile` REPLACES the child environment (execFile with `env`
+  // set), so anything missing here is genuinely absent for vela. `vela model
+  // list` resolves its config home up front and exits non-zero with
+  // "$HOME is not defined" when HOME is unset — while `vela model preset`
+  // and `vela --version` do not need it. A packaged daemon spawned with a
+  // stripped env (or any caller that did not forward HOME) would therefore
+  // detect AMR and seed the picker from preset, yet fail every run's remote
+  // catalog probe. Backfill HOME from the OS so the authoritative catalog
+  // call is never silently decapitated by a missing home dir.
+  if (!env.HOME?.trim()) {
+    const home = os.homedir();
+    if (home) env.HOME = home;
+  }
+  // Identify Open Design as the host so the vela CLI tags its command +
+  // model_request analytics with source=open_design (revenue attribution).
+  // Not PII (unlike the installation id above), so set it regardless of the
+  // telemetry-consent gate that amrAnalyticsIdentityEnv applies.
+  if (!env.AMR_CLIENT_SOURCE?.trim()) {
+    env.AMR_CLIENT_SOURCE = 'open_design';
+  }
+  if (!env.OPENCODE_TEST_HOME?.trim() && env.OD_DATA_DIR?.trim()) {
+    env.OPENCODE_TEST_HOME = path.join(
+      env.OD_DATA_DIR.trim(),
+      'amr',
+      'opencode-home',
+    );
+  }
+  if (!env.VELA_OPENCODE_BIN?.trim()) {
+    const opencodeBin = resolveAmrOpenCodeExecutable(env);
+    if (opencodeBin) env.VELA_OPENCODE_BIN = opencodeBin;
+  }
+  return env;
+}
+
+/**
+ * OpenCode spawn environment customizer.
+ * Strips stale OpenCode server env vars and disables project-config
+ * discovery to prevent bun install from corrupting pnpm workspaces.
+ */
+export function customizeOpenCodeSpawnEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  stripKeysCaseInsensitive(env, [
+    'OPENCODE',
+    'OPENCODE_PID',
+    'OPENCODE_RUN_ID',
+    'OPENCODE_SERVER_PASSWORD',
+  ]);
+  // OpenCode is bun-based and, left to its defaults, walks up from its cwd to
+  // the nearest project root and runs `bun install` there at startup to set up
+  // local plugins. When that root is a pnpm workspace (the daemon's own repo,
+  // or a project nested inside it), the install replaces the pnpm `.pnpm` store
+  // with a bun `node_modules/.bun` + `bun.lock` and breaks the workspace.
+  // Disable project-config discovery (and its install) so OpenCode only honors
+  // the config the daemon injects via OPENCODE_CONFIG_CONTENT — this is exactly
+  // what the AMR path already does for its private OpenCode server.
+  if (!env.OPENCODE_DISABLE_PROJECT_CONFIG?.trim()) {
+    env.OPENCODE_DISABLE_PROJECT_CONFIG = 'true';
+  }
+  return env;
+}
+
+/**
+ * Build the environment passed to spawn() for a given agent.
+ *
+ * Uses the agent definition's `spawnEnvCustomizer` (when present) to apply
+ * agent-specific env tweaks. Falls back to the shared sandbox reapplication
+ * for agents without a customizer.
+ *
+ * Auth/config precedence for Local CLI launches:
+ * 1. Provider BYOK is separate (used by Open Design's direct provider API).
+ * 2. The inherited launch env represents the user's local CLI setup.
+ * 3. `configuredEnv` (Settings → Local CLI → Advanced) wins over inherited env.
+ */
 export function spawnEnvForAgent(
   agentId: string,
   baseEnv: RuntimeEnvMap,
   configuredEnv: unknown = {},
   systemProxyEnv: RuntimeEnvMap = resolveSystemProxyEnv(),
   _options: SpawnEnvOptions = {},
+  agentDef?: { spawnEnvCustomizer?: (env: NodeJS.ProcessEnv) => NodeJS.ProcessEnv } | null,
 ): NodeJS.ProcessEnv {
   const sandboxRuntime = sandboxRuntimeConfigForBaseEnv(baseEnv);
   const expandedConfiguredEnv = expandConfiguredEnv(configuredEnv);
@@ -83,69 +164,47 @@ export function spawnEnvForAgent(
     baseEnv,
     expandedConfiguredEnv,
   );
-  if (agentId === 'amr') {
-    Object.assign(env, amrVelaProfileEnv(env));
-    Object.assign(env, amrAnalyticsIdentityEnv(env));
-    // `execAgentFile` REPLACES the child environment (execFile with `env`
-    // set), so anything missing here is genuinely absent for vela. `vela model
-    // list` resolves its config home up front and exits non-zero with
-    // "$HOME is not defined" when HOME is unset — while `vela model preset`
-    // and `vela --version` do not need it. A packaged daemon spawned with a
-    // stripped env (or any caller that did not forward HOME) would therefore
-    // detect AMR and seed the picker from preset, yet fail every run's remote
-    // catalog probe. Backfill HOME from the OS so the authoritative catalog
-    // call is never silently decapitated by a missing home dir.
-    if (!env.HOME?.trim()) {
-      const home = os.homedir();
-      if (home) env.HOME = home;
-    }
-    // Identify Open Design as the host so the vela CLI tags its command +
-    // model_request analytics with source=open_design (revenue attribution).
-    // Not PII (unlike the installation id above), so set it regardless of the
-    // telemetry-consent gate that amrAnalyticsIdentityEnv applies.
-    if (!env.AMR_CLIENT_SOURCE?.trim()) {
-      env.AMR_CLIENT_SOURCE = 'open_design';
-    }
-    if (!env.OPENCODE_TEST_HOME?.trim() && env.OD_DATA_DIR?.trim()) {
-      env.OPENCODE_TEST_HOME = path.join(
-        env.OD_DATA_DIR.trim(),
-        'amr',
-        'opencode-home',
-      );
-    }
-    if (!env.VELA_OPENCODE_BIN?.trim()) {
-      const opencodeBin = resolveAmrOpenCodeExecutable(env);
-      if (opencodeBin) env.VELA_OPENCODE_BIN = opencodeBin;
-    }
-    return reapplySandboxRuntimeEnv(env, sandboxRuntime);
-  }
-  if (agentId === 'claude') {
-    return reapplySandboxRuntimeEnv(env, sandboxRuntime);
-  }
-  if (agentId === 'codex') {
-    return reapplySandboxRuntimeEnv(env, sandboxRuntime);
-  }
-  if (agentId === 'opencode') {
-    stripKeysCaseInsensitive(env, [
-      'OPENCODE',
-      'OPENCODE_PID',
-      'OPENCODE_RUN_ID',
-      'OPENCODE_SERVER_PASSWORD',
-    ]);
-    // OpenCode is bun-based and, left to its defaults, walks up from its cwd to
-    // the nearest project root and runs `bun install` there at startup to set up
-    // local plugins. When that root is a pnpm workspace (the daemon's own repo,
-    // or a project nested inside it), the install replaces the pnpm `.pnpm` store
-    // with a bun `node_modules/.bun` + `bun.lock` and breaks the workspace.
-    // Disable project-config discovery (and its install) so OpenCode only honors
-    // the config the daemon injects via OPENCODE_CONFIG_CONTENT — this is exactly
-    // what the AMR path already does for its private OpenCode server.
-    if (!env.OPENCODE_DISABLE_PROJECT_CONFIG?.trim()) {
-      env.OPENCODE_DISABLE_PROJECT_CONFIG = 'true';
-    }
-    return reapplySandboxRuntimeEnv(env, sandboxRuntime);
+
+  // Resolve the customizer: explicit agentDef takes priority, then fall back
+  // to looking up the built-in agent definition so the customizer is always
+  // found even when callers don't have the def handy.
+  const customizer =
+    agentDef?.spawnEnvCustomizer ?? lookupAgentSpawnEnvCustomizer(agentId);
+
+  if (customizer) {
+    return reapplySandboxRuntimeEnv(customizer(env), sandboxRuntime);
   }
   return reapplySandboxRuntimeEnv(env, sandboxRuntime);
+}
+
+/**
+ * Lazy-resolve the spawn-env customizer from the agent definition registry.
+ * Uses a dynamic import to avoid a circular dependency between env.ts and
+ * defs/index.ts at module-init time. The import is cached after first use.
+ */
+let _cachedGetAgentDef: ((id: string) => { spawnEnvCustomizer?: (env: NodeJS.ProcessEnv) => NodeJS.ProcessEnv } | undefined) | null = null;
+
+function lookupAgentSpawnEnvCustomizer(
+  agentId: string,
+): ((env: NodeJS.ProcessEnv) => NodeJS.ProcessEnv) | undefined {
+  if (!_cachedGetAgentDef) {
+    // Dynamic require to break the cycle: defs/index.ts imports agent def
+    // files which may import env.ts, but env.ts only calls getAgentDef at
+    // runtime, not at module-init time.
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const mod = require('./defs/index.js') as {
+        getAgentDef: (id: string) => { spawnEnvCustomizer?: (env: NodeJS.ProcessEnv) => NodeJS.ProcessEnv } | undefined;
+      };
+      _cachedGetAgentDef = mod.getAgentDef;
+    } catch {
+      // defs/index.js may not be available in minimal builds; return undefined
+      // and the caller skips the customizer gracefully.
+      return undefined;
+    }
+  }
+  const def = _cachedGetAgentDef?.(agentId);
+  return def?.spawnEnvCustomizer;
 }
 
 export function openDesignAmrTraceEnv(input: {

@@ -85,3 +85,65 @@ export async function listSkills(roots: string | readonly string[]): Promise<Ski
 export function findSkillById(skills: SkillInfo[], id: string): SkillInfo | undefined {
   return skills.find((s) => s.id === id);
 }
+
+// ---- Trigger matching ----
+
+/**
+ * A trigger can be:
+ *  - A plain substring: "review" matches any message containing "review"
+ *  - A /regex/ pattern: "/review|audit/" matches messages with "review" or "audit"
+ *  - A keyword prefix "kw:": "kw:review,audit" matches whole-word keywords
+ *
+ * Matching is case-insensitive.
+ */
+export function matchTrigger(message: string, trigger: string): boolean {
+  const trimmed = trigger.trim();
+  if (!trimmed) return false;
+
+  const msg = message.toLowerCase();
+
+  // Regex pattern: /pattern/flags
+  const regexMatch = trimmed.match(/^\/(.+)\/([a-z]*)$/);
+  if (regexMatch) {
+    try {
+      const re = new RegExp(regexMatch[1]!, regexMatch[2] || 'i');
+      return re.test(message); // Use original message for regex (flags handle case)
+    } catch {
+      return false; // Invalid regex — don't match
+    }
+  }
+
+  // Keyword prefix: "kw:word1,word2,..."
+  if (trimmed.startsWith('kw:')) {
+    const keywords = trimmed.slice(3).split(',').map((k) => k.trim().toLowerCase()).filter(Boolean);
+    if (keywords.length === 0) return false;
+    // Match whole words only
+    const wordBoundary = /\b\w+\b/g;
+    const msgWords = new Set(msg.match(wordBoundary)?.map((w) => w.toLowerCase()) ?? []);
+    return keywords.some((kw) => msgWords.has(kw));
+  }
+
+  // Default: substring match (case-insensitive)
+  return msg.includes(trimmed.toLowerCase());
+}
+
+/**
+ * Find the first workflow whose triggers match the given message.
+ * Returns the matching SkillInfo, or null if no trigger matches.
+ *
+ * Workflows without triggers never auto-match.
+ */
+export function findMatchingWorkflow(
+  skills: SkillInfo[],
+  message: string,
+): SkillInfo | null {
+  for (const skill of skills) {
+    if (!skill.triggers || skill.triggers.length === 0) continue;
+    for (const trigger of skill.triggers) {
+      if (matchTrigger(message, trigger)) {
+        return skill;
+      }
+    }
+  }
+  return null;
+}

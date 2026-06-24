@@ -1,5 +1,6 @@
 import { execAgentFile } from './shared.js';
 import type { RuntimeAgentDef, RuntimeModelOption } from '../types.js';
+import { customizeAmrSpawnEnv } from '../env.js';
 
 const AMR_MODELS_TIMEOUT_MS = 10_000;
 const AMR_MODELS_RETRY_DELAYS_MS = [250, 750] as const;
@@ -281,4 +282,5 @@ export const amrAgentDef = {
   // selection comes from the live `vela models` catalog and is preflighted
   // before spawn.
   defaultModelEnvVar: 'VELA_DEFAULT_MODEL',
+  spawnEnvCustomizer: customizeAmrSpawnEnv,
 } satisfies RuntimeAgentDef;

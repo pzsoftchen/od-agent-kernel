@@ -51,6 +51,23 @@ export interface ChatRouterOptions {
     events: import('@od-kernel/agent-runtime').AgentEvent[];
     error?: string;
   }) => void | Promise<void>;
+  /**
+   * Optional: Auto-match a workflow based on the user's message.
+   * When set and no explicit workflowId is provided, this function is called
+   * with the user's message. If it returns a workflow ID, that workflow
+   * is resolved and used automatically. Use with findMatchingWorkflow()
+   * from @od-kernel/skill-utils for trigger-based matching.
+   */
+  autoMatchWorkflow?: (message: string) => Promise<string | null> | string | null;
+  /**
+   * Optional: Map BYOK proxy provider names to agent IDs.
+   * When a request hits /api/proxy/:provider/stream, the provider param
+   * is resolved through this map to determine which agent to launch.
+   * If no mapping is found, the provider name is used directly as the
+   * agent ID (after lowercasing). Default built-in mappings:
+   *   claude → claude, opencode → opencode, codex → codex
+   */
+  providerAgentMap?: Record<string, string>;
 }
 
 export function createChatRouter(options: ChatRouterOptions): Router {
@@ -89,14 +106,25 @@ export function createChatRouter(options: ChatRouterOptions): Router {
         }
       }
 
-      if (workflowId) {
+      // Resolve effective workflowId: explicit takes priority, then trigger auto-match
+      let effectiveWorkflowId = workflowId ? String(workflowId) : null;
+
+      if (!effectiveWorkflowId && options.autoMatchWorkflow) {
         try {
-          activeWorkflow = await resolveWorkflow(String(workflowId));
+          effectiveWorkflowId = await options.autoMatchWorkflow(String(message));
+        } catch {
+          // Auto-match failure is non-fatal — proceed without a workflow
+        }
+      }
+
+      if (effectiveWorkflowId) {
+        try {
+          activeWorkflow = await resolveWorkflow(effectiveWorkflowId);
         } catch (wfErr) {
           // Workflow resolution threw → 400 (bad request, don't start agent)
           const msg = wfErr instanceof Error ? wfErr.message : String(wfErr);
           res.status(400).json({
-            error: { code: 'VALIDATION_FAILED', message: `Failed to resolve workflow "${workflowId}": ${msg}` },
+            error: { code: 'VALIDATION_FAILED', message: `Failed to resolve workflow "${effectiveWorkflowId}": ${msg}` },
           });
           return;
         }
@@ -264,6 +292,20 @@ export function createChatRouter(options: ChatRouterOptions): Router {
       return;
     }
 
+    // Resolve agent ID: custom mapping → built-in defaults → provider name as-is
+    const defaultMap: Record<string, string> = {
+      claude: 'claude',
+      opencode: 'opencode',
+      codex: 'codex',
+      gemini: 'gemini',
+      qwen: 'qwen',
+      deepseek: 'deepseek',
+      copilot: 'copilot',
+      cursor: 'cursor-agent',
+    };
+    const effectiveMap = { ...defaultMap, ...options.providerAgentMap };
+    const agentId = effectiveMap[String(provider).toLowerCase()] ?? String(provider).toLowerCase();
+
     const run = runs.create(`proxy-${String(provider)}`, process.cwd());
     runs.start(run.id);
 
@@ -275,14 +317,14 @@ export function createChatRouter(options: ChatRouterOptions): Router {
 
     sse.send('start', {
       runId: run.id,
-      agentId: `proxy-${String(provider)}`,
+      agentId,
       cwd: process.cwd(),
       model: model ? String(model) : undefined,
     });
 
     try {
       const events = orchestrator.run({
-        agentId: String(provider).toLowerCase() === 'claude' ? 'claude' : 'opencode',
+        agentId,
         systemPrompt: '',
         userPrompt: String(message),
         cwd: process.cwd(),

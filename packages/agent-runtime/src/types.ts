@@ -97,6 +97,10 @@ export type RuntimeAgentDef = {
     timeoutMs?: number;
   };
   acpMcpEnvFormat?: 'array' | 'map';
+  /** Optional: customize the spawn environment for this agent. Called after
+   *  the shared env assembly but before sandbox reapplication. Receives the
+   *  fully-merged env and returns the (possibly modified) env. */
+  spawnEnvCustomizer?: (env: NodeJS.ProcessEnv) => NodeJS.ProcessEnv;
 };
 
 export type DetectedAgent = Omit<

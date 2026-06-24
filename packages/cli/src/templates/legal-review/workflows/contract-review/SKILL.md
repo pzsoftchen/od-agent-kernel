@@ -1,6 +1,7 @@
 ---
 name: contract-review
 description: Legal contract review and risk analysis
+triggers: [contract, legal review, legal audit, agreement, NDA, terms of service]
 ---
 
 # Contract Review Workflow

@@ -1,6 +1,7 @@
 ---
 name: analysis-pipeline
 description: End-to-end data analysis pipeline
+triggers: [analyze, data analysis, data pipeline, statistics, visualize, explore data]
 ---
 
 # Data Analysis Pipeline

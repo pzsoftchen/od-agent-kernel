@@ -1,5 +1,6 @@
 import { DEFAULT_MODEL_OPTION, parseLineSeparatedModels } from './shared.js';
 import type { RuntimeAgentDef } from '../types.js';
+import { customizeOpenCodeSpawnEnv } from '../env.js';
 
 export const opencodeAgentDef = {
     id: 'opencode',
@@ -58,4 +59,5 @@ export const opencodeAgentDef = {
     // invocation without polluting the user's saved config files. See
     // <https://opencode.ai/docs/config> and issue #2142.
     externalMcpInjection: 'opencode-env-content',
+    spawnEnvCustomizer: customizeOpenCodeSpawnEnv,
 } satisfies RuntimeAgentDef;

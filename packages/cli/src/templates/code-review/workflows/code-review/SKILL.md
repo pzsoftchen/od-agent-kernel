@@ -1,6 +1,7 @@
 ---
 name: code-review
 description: Security-focused code review with severity classification
+triggers: [review, code review, security audit, audit code, check code]
 ---
 
 # Code Review Workflow

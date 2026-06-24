@@ -8,6 +8,7 @@
  */
 
 import { spawn, type ChildProcess } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import type { DetectedAgent, RuntimeEnv } from './types.js';
 import type { RuntimeModuleDeps } from './deps.js';
 import { resolveDeps } from './deps.js';
@@ -79,6 +80,8 @@ interface ActiveRun {
   child: ChildProcess;
   agentId: string;
   sigkillTimer?: ReturnType<typeof setTimeout>;
+  /** Shared ref so the close handler and cancel() agree on whether SIGTERM was intentional. */
+  cancelRef: { cancelled: boolean };
 }
 
 // ---- Factory ----
@@ -170,8 +173,7 @@ export function createAgentOrchestrator(
       const executable = binPath ?? def.bin;
       // Use caller-provided runId for correlation with run-service
       const runId =
-        input.runId ??
-        `run-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+        input.runId ?? randomUUID();
 
       yield { type: 'thinking', text: `Starting ${def.name}...` };
 
@@ -187,6 +189,9 @@ export function createAgentOrchestrator(
         streamKind = 'json';
       }
 
+      // ---- Cancellation ref (shared with cancel()) ----
+      const cancelRef = { cancelled: false };
+
       try {
         // ---- Spawn ----
         const child = spawn(executable, args, {
@@ -195,7 +200,7 @@ export function createAgentOrchestrator(
           stdio: ['pipe', 'pipe', 'pipe'],
         });
 
-        activeRuns.set(runId, { child, agentId: def.id });
+        activeRuns.set(runId, { child, agentId: def.id, cancelRef });
 
         // stdin for prompt-via-stdin agents
         if (def.promptViaStdin && child.stdin) {
@@ -274,6 +279,9 @@ export function createAgentOrchestrator(
           handler.flush();
           if (signal && signal !== 'SIGTERM') {
             stateRef.error = new Error(`Agent killed by signal ${signal}`);
+          } else if (signal === 'SIGTERM' && cancelRef.cancelled) {
+            // Intentional cancellation — leave stateRef.error null so the
+            // post-loop cleanup yields done:cancelled, not done:completed.
           } else if (code !== 0 && code !== null) {
             const tail = stderrRef.value
               ? ': ' + stderrRef.value.slice(-500)
@@ -320,7 +328,9 @@ export function createAgentOrchestrator(
         clearSigkill(runId);
         activeRuns.delete(runId);
 
-        if (stateRef.error) {
+        if (cancelRef.cancelled) {
+          yield { type: 'done', reason: 'cancelled' };
+        } else if (stateRef.error) {
           yield { type: 'error', error: stateRef.error.message };
           yield { type: 'done', reason: 'error' };
         } else {
@@ -329,11 +339,15 @@ export function createAgentOrchestrator(
       } catch (err) {
         clearSigkill(runId);
         activeRuns.delete(runId);
-        yield {
-          type: 'error',
-          error: err instanceof Error ? err.message : String(err),
-        };
-        yield { type: 'done', reason: 'error' };
+        if (cancelRef.cancelled) {
+          yield { type: 'done', reason: 'cancelled' };
+        } else {
+          yield {
+            type: 'error',
+            error: err instanceof Error ? err.message : String(err),
+          };
+          yield { type: 'done', reason: 'error' };
+        }
       }
     },
 
@@ -378,6 +392,10 @@ export function createAgentOrchestrator(
       const active = activeRuns.get(runId);
       if (!active) return;
 
+      // Mark as cancelled so the close handler + drain loop yield
+      // done:cancelled instead of done:completed.
+      active.cancelRef.cancelled = true;
+
       try {
         active.child.kill('SIGTERM');
         const timer = setTimeout(() => {
@@ -393,7 +411,8 @@ export function createAgentOrchestrator(
       } catch {
         // Already exited
       }
-      activeRuns.delete(runId);
+      // Don't delete from activeRuns here — the drain-loop cleanup in run()
+      // will call clearSigkill() + activeRuns.delete() when the child exits.
     },
   };
 

@@ -194,20 +194,37 @@ export function createChatRouter(options: ChatRouterOptions): Router {
             });
 
             const collectedEvents: import('@od-kernel/agent-runtime').AgentEvent[] = [];
+            let lastDoneReason: 'completed' | 'cancelled' | 'error' = 'completed';
             for await (const event of eventIter) {
               collectedEvents.push(event);
+              if (event.type === 'done') {
+                lastDoneReason = event.reason;
+              }
               sse.send('agent', event);
             }
 
-            runs.finish(run.id, 'succeeded');
-            sse.send('end', { code: 0, status: 'succeeded' });
+            // Determine finish status from the orchestrator's terminal done event.
+            // This is load-bearing: the orchestrator yields done:error and
+            // done:cancelled without throwing, so the chat-handler must read the
+            // done reason rather than always assuming 'succeeded'.
+            const finishStatus =
+              lastDoneReason === 'cancelled' ? 'cancelled' as const
+              : lastDoneReason === 'error' ? 'failed' as const
+              : 'succeeded' as const;
+
+            runs.finish(run.id, finishStatus);
+            sse.send('end', {
+              code: finishStatus === 'succeeded' ? 0 : 1,
+              status: finishStatus,
+            });
 
             // Notify analytics / artifact counting
             if (options.onRunFinished) {
               await Promise.resolve(
                 options.onRunFinished({
-                  run: { id: run.id, agentId: run.agentId, status: 'succeeded', cwd: run.cwd },
+                  run: { id: run.id, agentId: run.agentId, status: finishStatus, cwd: run.cwd },
                   events: collectedEvents,
+                  error: lastDoneReason === 'error' ? 'Agent reported an error' : undefined,
                 }),
               ).catch(() => { /* non-fatal */ });
             }
@@ -332,12 +349,24 @@ export function createChatRouter(options: ChatRouterOptions): Router {
         runId: run.id, // correlate for cancel support
       });
 
+      let lastDoneReason: 'completed' | 'cancelled' | 'error' = 'completed';
       for await (const event of events) {
+        if (event.type === 'done') {
+          lastDoneReason = event.reason;
+        }
         sse.send('agent', event);
       }
 
-      runs.finish(run.id, 'succeeded');
-      sse.send('end', { code: 0, status: 'succeeded' });
+      const finishStatus =
+        lastDoneReason === 'cancelled' ? 'cancelled' as const
+        : lastDoneReason === 'error' ? 'failed' as const
+        : 'succeeded' as const;
+
+      runs.finish(run.id, finishStatus);
+      sse.send('end', {
+        code: finishStatus === 'succeeded' ? 0 : 1,
+        status: finishStatus,
+      });
     } catch (agentErr) {
       const msg = agentErr instanceof Error ? agentErr.message : String(agentErr);
       runs.finish(run.id, 'failed', msg);

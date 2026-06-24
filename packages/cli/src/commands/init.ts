@@ -1,8 +1,11 @@
 import { mkdir, writeFile, cp } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const execFileAsync = promisify(execFile);
 
 function validateName(name: string, label: string): void {
   if (!name || name !== name.trim()) {
@@ -103,4 +106,16 @@ export async function initCommand(name: string, options: { template?: string }):
 
   console.log(`✅ Created ${name}/`);
   console.log(`   cd ${name} && od-kernel dev`);
+
+  // Auto-install dependencies so the project is ready to run immediately.
+  // Skip when pnpm binary isn't available (e.g. CI, Docker, or test fixtures).
+  console.log('Installing dependencies...');
+  try {
+    await execFileAsync('pnpm', ['--version'], { timeout: 5_000 });
+    await execFileAsync('pnpm', ['install'], { cwd: targetDir, timeout: 60_000 });
+    console.log('✅ Dependencies installed');
+  } catch {
+    console.log('⚠️  Could not run "pnpm install" automatically.');
+    console.log(`   Run it manually: cd ${name} && pnpm install`);
+  }
 }

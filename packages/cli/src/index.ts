@@ -47,14 +47,60 @@ program
 program
   .command('templates')
   .description('List available project templates')
-  .action(() => {
-    console.log('Available templates:');
-    console.log('  minimal         — Empty domain files, start from scratch');
-    console.log('  code-review     — Security-focused code review setup');
-    console.log('  legal-review     — Contract and legal document review');
-    console.log('  data-analysis   — Data analysis and visualization');
-    console.log('');
-    console.log('Usage: npx @od-kernel/cli init my-app --template <name>');
+  .action(async () => {
+    // Dynamically scan the templates directory so new templates
+    // show up automatically without manual CLI updates.
+    const { readdir } = await import('node:fs/promises');
+    const path = await import('node:path');
+    const { fileURLToPath } = await import('node:url');
+
+    const __dirname = path.dirname(fileURLToPath(import.meta.url));
+    const templatesDir = path.join(__dirname, 'templates');
+
+    try {
+      const entries = await readdir(templatesDir, { withFileTypes: true });
+      const templates = entries
+        .filter((e) => e.isDirectory())
+        .map((e) => e.name);
+
+      if (templates.length === 0) {
+        console.log('No templates found.');
+        return;
+      }
+
+      // Read descriptions from each template's SKILL.md or CONTEXT.md
+      // Fall back to the directory name if no description is found.
+      const { readFile } = await import('node:fs/promises');
+      const templateDescriptions: { name: string; description: string }[] = [];
+
+      for (const name of templates) {
+        let description = '';
+        // Try to extract the first heading from prompts.md as a one-line hint
+        const promptsPath = path.join(templatesDir, name, 'prompts.md');
+        try {
+          const content = await readFile(promptsPath, 'utf-8');
+          const firstLine = content.split('\n').find((l) => l.startsWith('# '));
+          if (firstLine) {
+            description = firstLine.replace(/^# /, '').trim();
+          }
+        } catch {
+          description = `${name} template`;
+        }
+        templateDescriptions.push({ name, description });
+      }
+
+      console.log('Available templates:');
+      for (const t of templateDescriptions) {
+        const label = `  ${t.name.padEnd(16)} — ${t.description}`;
+        console.log(label);
+      }
+      console.log('');
+      console.log('Usage: npx @od-kernel/cli init my-app --template <name>');
+    } catch {
+      // If templates directory doesn't exist, show a sensible message
+      console.log('No templates directory found.');
+      console.log('Usage: npx @od-kernel/cli init my-app --template <name>');
+    }
   });
 
 program

@@ -21,9 +21,17 @@ export function createSseResponse(res: Response): SseSession {
   });
 
   // Keepalive heartbeat (every 15 seconds)
+  let keepaliveCleared = false;
   const keepalive = setInterval(() => {
     res.write(': keepalive\n\n');
   }, 15_000);
+
+  const clearKeepalive = () => {
+    if (!keepaliveCleared) {
+      keepaliveCleared = true;
+      clearInterval(keepalive);
+    }
+  };
 
   const session: SseSession = {
     send(event: string, data: unknown, id?: string) {
@@ -32,16 +40,19 @@ export function createSseResponse(res: Response): SseSession {
       res.write(`data: ${JSON.stringify(data)}\n\n`);
     },
     end() {
+      // Clear keepalive BEFORE ending the response to prevent the timer
+      // from firing write() on a closed stream (ERR_STREAM_WRITE_AFTER_END).
+      clearKeepalive();
       res.end();
     },
     cleanup() {
-      clearInterval(keepalive);
+      clearKeepalive();
     },
   };
 
-  // Clean up on connection close
+  // Clean up on connection close (final safety net)
   res.on('close', () => {
-    clearInterval(keepalive);
+    clearKeepalive();
   });
 
   return session;

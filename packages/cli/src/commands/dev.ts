@@ -11,7 +11,14 @@ interface DomainContext {
 }
 
 export async function devCommand(options: { port?: string }): Promise<void> {
-  const port = parseInt(options.port ?? '7456', 10);
+  const portStr = options.port ?? '7456';
+  if (!/^\d{1,5}$/.test(portStr)) {
+    throw new Error(`Invalid port: "${portStr}". Must be a number between 1-65535.`);
+  }
+  const port = parseInt(portStr, 10);
+  if (port < 1 || port > 65535) {
+    throw new Error(`Port ${port} is out of range (1-65535).`);
+  }
   const cwd = process.cwd();
   const domainDir = path.join(cwd, 'domain');
 
@@ -56,7 +63,9 @@ export async function devCommand(options: { port?: string }): Promise<void> {
   app.get('/api/workflows', (_req, res) => res.json(workflows));
 
   // Chat router
-  app.use('/api', createChatRouter({
+  // NOTE: Chat router routes already include /api prefix internally.
+  // Do NOT add a mount prefix here — Express strips it and routes won't match.
+  app.use(createChatRouter({
     runs,
     orchestrator,
     composePrompt: (input) => {
@@ -74,7 +83,8 @@ export async function devCommand(options: { port?: string }): Promise<void> {
           locale: Intl.DateTimeFormat().resolvedOptions().locale,
         });
       }
-      return composePrompt(input);
+      // Default prompt composer — propagate domain memory if loaded.
+      return composePrompt({ ...input, memory: memoryText || input.memory });
     },
     resolveContext: {
       listAll: async () => contexts,
@@ -100,17 +110,30 @@ export async function devCommand(options: { port?: string }): Promise<void> {
     // When a user says "review this code" and a workflow has trigger "review",
     // that workflow is automatically selected without explicit workflowId.
     autoMatchWorkflow: async (message: string) => {
-      const skills = await listSkills([path.join(domainDir, 'workflows')]);
-      const matched = findMatchingWorkflow(skills, message);
+      // Reuse the already-loaded workflows instead of re-reading from disk.
+      const matched = findMatchingWorkflow(workflows, message);
       return matched?.id ?? null;
     },
   }));
 
-  app.listen(port, async () => {
-    const agents = await orchestrator.listAgents();
-    console.log(`ready on :${port}`);
-    console.log(`  contexts: ${contexts.length} found`);
-    console.log(`  workflows: ${workflows.length} found`);
-    console.log(`  agents: ${agents.map(a => a.id).join(', ')}`);
+  const server = app.listen(port, async () => {
+    try {
+      const agents = await orchestrator.listAgents();
+      console.log(`ready on :${port}`);
+      console.log(`  contexts: ${contexts.length} found`);
+      console.log(`  workflows: ${workflows.length} found`);
+      console.log(`  agents: ${agents.map(a => a.id).join(', ')}`);
+    } catch (err) {
+      console.error('Failed to detect agents on startup:', err instanceof Error ? err.message : String(err));
+    }
+  });
+
+  server.on('error', (err: NodeJS.ErrnoException) => {
+    if (err.code === 'EADDRINUSE') {
+      console.error(`Port ${port} is already in use. Use -p <port> to choose a different one.`);
+    } else {
+      console.error(`Server error: ${err.message}`);
+    }
+    process.exit(1);
   });
 }

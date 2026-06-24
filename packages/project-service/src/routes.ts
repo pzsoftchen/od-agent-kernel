@@ -14,10 +14,16 @@ export function registerProjectRoutes(app: Express, service: ProjectService): vo
 
   // POST /api/projects — create a new project
   app.post('/api/projects', (req: Request, res: Response) => {
-    const { name, baseDir } = req.body as { name?: string; baseDir?: string };
-    if (!name || !baseDir) {
+    if (typeof req.body !== 'object' || req.body === null) {
       res.status(400).json({
-        error: { code: 'BAD_REQUEST', message: 'name and baseDir are required' },
+        error: { code: 'BAD_REQUEST', message: 'Request body must be a JSON object' },
+      });
+      return;
+    }
+    const { name, baseDir } = req.body as { name?: unknown; baseDir?: unknown };
+    if (typeof name !== 'string' || !name.trim() || typeof baseDir !== 'string' || !baseDir.trim()) {
+      res.status(400).json({
+        error: { code: 'BAD_REQUEST', message: 'name and baseDir are required (non-empty strings)' },
       });
       return;
     }
@@ -39,8 +45,20 @@ export function registerProjectRoutes(app: Express, service: ProjectService): vo
 
   // PATCH /api/projects/:id — update a project
   app.patch('/api/projects/:id', (req: Request, res: Response) => {
-    const { name } = req.body as { name?: string };
-    const updated = service.update(String(req.params.id), { name });
+    if (typeof req.body !== 'object' || req.body === null) {
+      res.status(400).json({
+        error: { code: 'BAD_REQUEST', message: 'Request body must be a JSON object' },
+      });
+      return;
+    }
+    const { name } = req.body as { name?: unknown };
+    if (name !== undefined && (typeof name !== 'string' || !name.trim())) {
+      res.status(400).json({
+        error: { code: 'BAD_REQUEST', message: 'name must be a non-empty string' },
+      });
+      return;
+    }
+    const updated = service.update(String(req.params.id), { name: name as string });
     if (!updated) {
       res.status(404).json({
         error: { code: 'NOT_FOUND', message: 'Project not found' },

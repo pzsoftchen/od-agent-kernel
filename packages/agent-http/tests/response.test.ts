@@ -64,8 +64,8 @@ describe('statusForError', () => {
   });
 
   it('defaults to 500 for unknown error codes', () => {
-    // Use a code that's in the API_ERROR_CODES but not in ERROR_STATUS_BY_CODE
-    const error = createApiError('AGENT_PROMPT_TOO_LARGE', 'too large');
+    // Use a fabricated code to verify the default fallback.
+    const error = createApiError('MADE_UP_CODE' as never, 'unknown');
     expect(statusForError(error)).toBe(500);
   });
 });

@@ -57,8 +57,10 @@ export function mountJsonRoute<Input, Output, Deps>(
       }
       sendJson(res, spec.successStatus ?? 200, result.value);
     } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
-      sendApiError(res, 500, createApiError('INTERNAL_ERROR', message));
+      // Log the full error server-side, but return a generic message to the
+      // client so internal details (file paths, SQL, stack traces) don't leak.
+      console.error('[adapter] unhandled route error:', e instanceof Error ? e.message : String(e));
+      sendApiError(res, 500, createApiError('INTERNAL_ERROR', 'Internal server error'));
     }
   });
 }

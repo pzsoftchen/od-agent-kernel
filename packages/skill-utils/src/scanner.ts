@@ -68,20 +68,26 @@ export async function listSkills(roots: string | readonly string[]): Promise<Ski
           const parsed = await parseSkillFile(skillFile);
           skills.push({
             id: entry.name,
-            name: parsed.data.name ?? entry.name,
-            description: parsed.data.description ?? '',
+            name: parsed.data.name || entry.name,
+            description: parsed.data.description || '',
             source: 'user' as SkillSource,
             dir: skillDir,
             body: parsed.body,
             triggers: parsed.data.triggers,
             requiresContext: parsed.data.requiresContext ?? true,
           });
-        } catch {
-          // Skip dirs without SKILL.md
+        } catch (err) {
+          // ENOENT: dir exists but no SKILL.md file — expected.
+          if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+            console.error(`[skill-utils] Error reading ${skillFile}:`, err instanceof Error ? err.message : String(err));
+          }
         }
       }
-    } catch {
-      // Root dir doesn't exist — skip
+    } catch (err) {
+      // ENOENT: root dir doesn't exist — expected.
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+        console.error(`[skill-utils] Error reading directory ${root}:`, err instanceof Error ? err.message : String(err));
+      }
     }
   }
 

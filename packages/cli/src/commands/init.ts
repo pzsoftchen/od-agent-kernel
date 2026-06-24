@@ -4,7 +4,17 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+function validateName(name: string, label: string): void {
+  if (!name || name !== name.trim()) {
+    throw new Error(`${label} must not be empty or have leading/trailing whitespace`);
+  }
+  if (name.includes('..') || name.includes('/') || name.includes('\\') || name.includes('\0')) {
+    throw new Error(`${label} contains invalid characters: "${name}"`);
+  }
+}
+
 export async function initCommand(name: string, options: { template?: string }): Promise<void> {
+  validateName(name, 'Project name');
   const targetDir = path.join(process.cwd(), name);
   const template = options.template ?? 'minimal';
 

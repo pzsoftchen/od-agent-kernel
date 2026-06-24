@@ -79,7 +79,9 @@ function isIpLiteralHostname(hostname: unknown): boolean {
 
 function isLoopbackOrPrivateLanHost(hostname: string): boolean {
   if (['127.0.0.1', 'localhost', '[::1]'].includes(hostname)) return true;
-  if (hostname === '0.0.0.0') return true;
+  // 0.0.0.0 means "all interfaces" — it is NOT a loopback address and
+  // should never be treated as safe/local. An attacker on the same network
+  // can craft a Host header with 0.0.0.0 to bypass the same-origin guard.
   return isPrivateIpv4(hostname);
 }
 
@@ -111,9 +113,12 @@ function allowedBrowserPorts(
 ): number[] {
   const ports: number[] = [];
   const primary = Number(port);
-  if (primary) ports.push(primary);
+  // Port 0 is valid (kernel-assigned ephemeral) — must not be filtered out.
+  if (!isNaN(primary) && port !== null && port !== undefined && port !== '') {
+    ports.push(primary);
+  }
   const webPort = Number(env.OD_WEB_PORT);
-  if (webPort && webPort !== primary) ports.push(webPort);
+  if (!isNaN(webPort) && webPort !== primary) ports.push(webPort);
   return ports;
 }
 
@@ -191,7 +196,13 @@ function isLocalSameOrigin(
   const origin = headerValue(req.headers?.origin);
   const ports = allowedBrowserPorts(port, env);
   const bindHost = env.OD_BIND_HOST || '127.0.0.1';
-  const extraAllowedOrigins = configuredAllowedOrigins(env);
+  let extraAllowedOrigins: string[];
+  try {
+    extraAllowedOrigins = configuredAllowedOrigins(env);
+  } catch {
+    console.error('[origin-guard] OD_ALLOWED_ORIGINS contains an invalid URL — ignoring.');
+    extraAllowedOrigins = [];
+  }
   const ipOnlyExtraOrigins = extraAllowedOrigins.filter((o) =>
     isIpLiteralHostname(new URL(o).hostname),
   );

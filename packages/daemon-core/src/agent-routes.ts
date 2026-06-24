@@ -39,7 +39,10 @@ export function registerAgentRoutes(
   app.post(
     '/api/agents/:id/launch-terminal',
     async (req: Request, res: Response) => {
-      const agentId = String(req.params.id);
+      // req.params.id is string | string[] | undefined under noUncheckedIndexedAccess.
+      // String(undefined) → "undefined" (truthy!) so use explicit check.
+      const rawId = req.params.id;
+      const agentId = typeof rawId === 'string' ? rawId : '';
       if (!agentId) {
         res.status(400).json({
           error: { code: 'BAD_REQUEST', message: 'agent ID is required' },

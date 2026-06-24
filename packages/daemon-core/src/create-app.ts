@@ -30,6 +30,10 @@ export function createApp(options: CreateAppOptions = {}): Express {
       const openPaths = ['/health', '/api/health', '/ready', '/api/ready', '/version', '/api/version'];
       if (openPaths.includes(req.path)) return next();
 
+      // CORS preflight requests don't include Authorization —
+      // let them pass through so the CORS middleware adds the required headers.
+      if (req.method === 'OPTIONS') return next();
+
       const auth = req.headers.authorization;
       if (!auth || auth !== `Bearer ${authToken}`) {
         res.status(401).json({ error: { code: 'UNAUTHORIZED', message: 'Invalid or missing API token' } });

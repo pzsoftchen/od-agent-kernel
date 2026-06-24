@@ -1201,6 +1201,9 @@ export function attachAcpSession({
                 input: { file_path: st.path ?? toolCallId },
               });
               send('agent', { type: 'tool_result', toolUseId: toolCallId, isError: failed });
+              // Clean up after terminal state — prevents unbounded Map growth
+              // for long ACP sessions with many write calls.
+              acpArtifactRunEventState.delete(toolCallId);
             }
           }
         }
@@ -1214,6 +1217,7 @@ export function attachAcpSession({
           const ownsPendingWriteSuppression = toolCallId === dsmlArtifactSuppressorToolCallId;
           const ownsPendingWriteCall = acpArtifactWriteToolCallIds.has(toolCallId);
           acpArtifactWriteToolCallIds.delete(toolCallId);
+          acpArtifactRunEventState.delete(toolCallId);
           if (ownsPendingWriteSuppression || ownsPendingWriteCall) {
             dsmlArtifactSuppressor = null;
             dsmlArtifactSuppressorToolCallId = null;

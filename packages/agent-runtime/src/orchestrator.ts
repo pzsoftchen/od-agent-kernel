@@ -204,6 +204,13 @@ export function createAgentOrchestrator(
 
         // stdin for prompt-via-stdin agents
         if (def.promptViaStdin && child.stdin) {
+          child.stdin.on('error', (err) => {
+            // EPIPE if child closes stdin before we finish writing —
+            // capture so it doesn't crash the process as an unhandled error.
+            if ((err as NodeJS.ErrnoException).code !== 'EPIPE') {
+              console.error(`[orchestrator] stdin error for ${def.id}:`, err.message);
+            }
+          });
           child.stdin.write(`${input.systemPrompt}\n\n${input.userPrompt}\n`);
           child.stdin.end();
         }
@@ -215,6 +222,10 @@ export function createAgentOrchestrator(
             if (stderrRef.value.length < stderrMaxBytes) {
               stderrRef.value += chunk.toString();
             }
+          });
+          child.stderr.on('error', (err) => {
+            // Stream errors (e.g. pipe overflow) should not crash the process.
+            console.error(`[orchestrator] stderr error for ${def.id}:`, err.message);
           });
         }
 
@@ -272,6 +283,9 @@ export function createAgentOrchestrator(
           child.stdout.on('data', (chunk: Buffer) => {
             handler.feed(chunk.toString());
           });
+          child.stdout.on('error', (err) => {
+            console.error(`[orchestrator] stdout error for ${def.id}:`, err.message);
+          });
         }
 
         // ---- Process lifecycle handlers ----
@@ -304,29 +318,34 @@ export function createAgentOrchestrator(
         // Pattern: create wake promise BEFORE checking queue emptiness.
         // If an event arrives between the queue drain and promise creation,
         // the re-check inside the Promise constructor catches it.
-        while (true) {
-          // Drain all buffered events
-          while (eventQueue.length > 0) {
-            yield eventQueue.shift()!;
-          }
-
-          if (stateRef.ended) break;
-
-          // Create wake promise with re-check to close the race window
-          await new Promise<void>((resolve) => {
-            pendingWake = resolve;
-            // An event may have landed after our queue drain above but before
-            // we set pendingWake.  If so, resolve immediately.
-            if (eventQueue.length > 0 || stateRef.ended) {
-              pendingWake = null;
-              resolve();
+        try {
+          while (true) {
+            // Drain all buffered events
+            while (eventQueue.length > 0) {
+              yield eventQueue.shift()!;
             }
-          });
+
+            if (stateRef.ended) break;
+
+            // Create wake promise with re-check to close the race window
+            await new Promise<void>((resolve) => {
+              pendingWake = resolve;
+              // An event may have landed after our queue drain above but before
+              // we set pendingWake.  If so, resolve immediately.
+              if (eventQueue.length > 0 || stateRef.ended) {
+                pendingWake = null;
+                resolve();
+              }
+            });
+          }
+        } finally {
+          // Always clean up, even if consumer breaks from for-await loop.
+          // Without this, sigkill timers leak and activeRuns grows unbounded.
+          clearSigkill(runId);
+          activeRuns.delete(runId);
         }
 
-        // ---- Cleanup ----
-        clearSigkill(runId);
-        activeRuns.delete(runId);
+        // ---- Cleanup (already done in finally above) ----
 
         if (cancelRef.cancelled) {
           yield { type: 'done', reason: 'cancelled' };

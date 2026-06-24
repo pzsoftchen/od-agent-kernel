@@ -1,7 +1,17 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
+function validateName(name: string, label: string): void {
+  if (!name || name !== name.trim()) {
+    throw new Error(`${label} must not be empty or have leading/trailing whitespace`);
+  }
+  if (name.includes('..') || name.includes('/') || name.includes('\\') || name.includes('\0')) {
+    throw new Error(`${label} contains invalid characters: "${name}"`);
+  }
+}
+
 export async function addCommand(type: string, name: string): Promise<void> {
+  validateName(name, 'Name');
   const cwd = process.cwd();
 
   if (type === 'context') {

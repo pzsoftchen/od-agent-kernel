@@ -32,7 +32,13 @@ export async function* parseSseStream(response: Response): AsyncIterable<SseEven
         if (line.startsWith('event: ')) {
           currentEvent = line.slice(7).trim();
         } else if (line.startsWith('data: ')) {
-          currentData = line.slice(6).trim();
+          // SSE spec: multiple data: lines are concatenated with \n.
+          // Only trim the first line; preserve inner whitespace for JSON payloads.
+          if (currentData) {
+            currentData += '\n' + line.slice(6);
+          } else {
+            currentData = line.slice(6).trim();
+          }
         } else if (line === '' && currentEvent) {
           try {
             const payload = JSON.parse(currentData);

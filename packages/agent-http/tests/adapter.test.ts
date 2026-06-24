@@ -89,7 +89,7 @@ describe('mountJsonRoute', () => {
     const res = await request(app).get('/api/boom');
     expect(res.status).toBe(500);
     expect(res.body.error.code).toBe('INTERNAL_ERROR');
-    expect(res.body.error.message).toBe('Unexpected failure');
+    expect(res.body.error.message).toBe('Internal server error');
   });
 
   it('returns custom success status from route spec', async () => {

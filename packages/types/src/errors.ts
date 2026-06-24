@@ -96,7 +96,9 @@ export function createApiError(
   message: string,
   init: Omit<ApiError, 'code' | 'message'> = {},
 ): ApiError {
-  return { code, message, ...init };
+  // `init` is placed first so `code` and `message` always win,
+  // even if `init` accidentally includes them at runtime.
+  return { ...init, code, message };
 }
 
 export function createApiErrorResponse(error: ApiError): ApiErrorResponse {

@@ -62,6 +62,10 @@ function createMemoryService(): ProjectService {
 }
 
 function createSqliteService(db: Database.Database): ProjectService {
+  // SQLite does NOT enforce foreign keys by default — the pragma is required
+  // per connection. Without it, ON DELETE CASCADE in the schema is silently ignored.
+  db.pragma('foreign_keys = ON');
+
   // Ensure schema exists
   db.exec(`
     CREATE TABLE IF NOT EXISTS projects (

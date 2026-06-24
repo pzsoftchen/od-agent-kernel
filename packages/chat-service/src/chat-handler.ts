@@ -342,15 +342,17 @@ export function createChatRouter(options: ChatRouterOptions): Router {
     try {
       const events = orchestrator.run({
         agentId,
-        systemPrompt: '',
+        systemPrompt: compose({ userPrompt: String(message) }),
         userPrompt: String(message),
         cwd: process.cwd(),
         model: model ? String(model) : undefined,
         runId: run.id, // correlate for cancel support
       });
 
+      const collectedEvents: import('@od-kernel/agent-runtime').AgentEvent[] = [];
       let lastDoneReason: 'completed' | 'cancelled' | 'error' = 'completed';
       for await (const event of events) {
+        collectedEvents.push(event);
         if (event.type === 'done') {
           lastDoneReason = event.reason;
         }
@@ -367,11 +369,32 @@ export function createChatRouter(options: ChatRouterOptions): Router {
         code: finishStatus === 'succeeded' ? 0 : 1,
         status: finishStatus,
       });
+
+      // Notify analytics / artifact counting (parity with main chat endpoint)
+      if (options.onRunFinished) {
+        await Promise.resolve(
+          options.onRunFinished({
+            run: { id: run.id, agentId: run.agentId, status: finishStatus, cwd: run.cwd },
+            events: collectedEvents,
+            error: lastDoneReason === 'error' ? 'Agent reported an error' : undefined,
+          }),
+        ).catch(() => { /* non-fatal */ });
+      }
     } catch (agentErr) {
       const msg = agentErr instanceof Error ? agentErr.message : String(agentErr);
       runs.finish(run.id, 'failed', msg);
       sse.send('error', { message: msg });
       sse.send('end', { code: 1, status: 'failed' });
+
+      if (options.onRunFinished) {
+        await Promise.resolve(
+          options.onRunFinished({
+            run: { id: run.id, agentId: run.agentId, status: 'failed', cwd: run.cwd },
+            events: [],
+            error: msg,
+          }),
+        ).catch(() => { /* non-fatal */ });
+      }
     }
 
     sse.end();

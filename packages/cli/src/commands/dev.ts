@@ -38,6 +38,12 @@ export async function devCommand(options: { port?: string }): Promise<void> {
     promptTemplate = await readFile(path.join(domainDir, 'prompts.md'), 'utf-8');
   } catch { /* use default */ }
 
+  // Load domain/memory.md if present
+  let memoryText = '';
+  try {
+    memoryText = await readFile(path.join(domainDir, 'memory.md'), 'utf-8');
+  } catch { /* no memory file — skip */ }
+
   // Infrastructure
   const app = createApp();
   const runs = createDaemonRunService();
@@ -62,7 +68,10 @@ export async function devCommand(options: { port?: string }): Promise<void> {
           'context:id': input.activeContext?.id,
           'workflow:body': input.activeWorkflow?.body,
           'workflow:name': input.activeWorkflow?.name,
+          'workflow:description': input.activeWorkflow?.description,
           instructions: input.instructions,
+          memory: memoryText || undefined,
+          locale: Intl.DateTimeFormat().resolvedOptions().locale,
         });
       }
       return composePrompt(input);
@@ -72,8 +81,7 @@ export async function devCommand(options: { port?: string }): Promise<void> {
       resolve: async (id) => contexts.find((c) => c.id === id) ?? null,
     },
     resolveWorkflow: async (id) => {
-      const skills = await listSkills([path.join(domainDir, 'workflows')]);
-      const found = skills.find((w) => w.id === id);
+      const found = workflows.find((w) => w.id === id);
       if (!found) return null;
       return {
         id: found.id,
@@ -81,7 +89,7 @@ export async function devCommand(options: { port?: string }): Promise<void> {
         description: found.description,
         body: found.body,
         dir: found.dir,
-        requiresContext: true,
+        requiresContext: found.requiresContext ?? true,
       };
     },
     stageSkillFiles: async (cwd, workflow) => {

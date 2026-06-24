@@ -36,14 +36,61 @@ export async function initCommand(name: string, options: { template?: string }):
         name,
         private: true,
         type: 'module',
-        scripts: { dev: 'od-kernel dev', start: 'od-kernel dev' },
-        dependencies: { '@od-kernel/cli': '^0.1.0' },
+        scripts: {
+          dev: 'od-kernel dev',
+          start: 'od-kernel dev',
+          postinstall: 'echo "✅ Run: npx od-kernel dev"',
+        },
+        devDependencies: {},
       },
       null,
       2,
     ) + '\n',
   );
 
+  // Create README.md with setup instructions
+  await writeFile(
+    path.join(targetDir, 'README.md'),
+    [
+      `# ${name}`,
+      '',
+      '## Setup',
+      '',
+      'Install the od-kernel CLI:',
+      '',
+      '```bash',
+      '# From npm (once published):',
+      'npm install -g @od-kernel/cli',
+      '',
+      '# Or from monorepo (development):',
+      'cd path/to/od-agent-kernel/packages/cli',
+      'pnpm link --global',
+      '```',
+      '',
+      '## Development',
+      '',
+      '```bash',
+      'od-kernel dev          # Start dev server on :7456',
+      'od-kernel add context <name>   # Add a domain context',
+      'od-kernel add workflow <name>  # Add a workflow',
+      '```',
+      '',
+      '## Project Structure',
+      '',
+      '```',
+      'domain/',
+      '├── prompts.md              # System prompt template (Mustache)',
+      '├── contexts/',
+      '│   └── <name>/',
+      '│       └── CONTEXT.md       # Domain knowledge',
+      '└── workflows/',
+      '    └── <name>/',
+      '        └── SKILL.md         # Workflow with triggers',
+      '```',
+      '',
+    ].join('\n') + '\n',
+  );
+
   console.log(`✅ Created ${name}/`);
-  console.log(`   cd ${name} && npx od-kernel dev`);
+  console.log(`   cd ${name} && od-kernel dev`);
 }

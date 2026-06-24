@@ -16,12 +16,14 @@ export interface SkillInfo {
   dir: string;
   body: string;
   triggers?: string[];
+  requiresContext?: boolean;
 }
 
 interface SkillFrontmatter {
   name?: string;
   description?: string;
   triggers?: string[];
+  requiresContext?: boolean;
 }
 
 function parseFrontmatter(content: string): { data: SkillFrontmatter; body: string } {
@@ -37,6 +39,9 @@ function parseFrontmatter(content: string): { data: SkillFrontmatter; body: stri
     let value: string | string[] = kv[2]!.trim();
     if (key === 'triggers') {
       value = value.replace(/[\[\]]/g, '').split(',').map((s) => s.trim()).filter(Boolean);
+    } else if (key === 'requiresContext') {
+      (data as Record<string, unknown>)[key] = value === 'true' || value === 'false' ? value === 'true' : undefined;
+      continue;
     }
     (data as Record<string, unknown>)[key] = value;
   }
@@ -69,6 +74,7 @@ export async function listSkills(roots: string | readonly string[]): Promise<Ski
             dir: skillDir,
             body: parsed.body,
             triggers: parsed.data.triggers,
+            requiresContext: parsed.data.requiresContext ?? true,
           });
         } catch {
           // Skip dirs without SKILL.md

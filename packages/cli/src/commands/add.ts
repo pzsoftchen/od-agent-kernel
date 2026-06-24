@@ -17,7 +17,29 @@ export async function addCommand(type: string, name: string): Promise<void> {
     await mkdir(dir, { recursive: true });
     await writeFile(
       path.join(dir, 'SKILL.md'),
-      `---\nname: ${name}\ndescription: Describe the workflow\ntriggers: []\n---\n# ${name} Workflow\n\n1. Step one\n2. Step two\n3. Step three\n`,
+      [
+        '---',
+        `name: ${name}`,
+        'description: Describe the workflow',
+        '# Triggers support three syntaxes:',
+        '#   - Substring match (case-insensitive):   review',
+        '#   - Regex pattern:                         /review|audit code/i',
+        '#   - Keyword match (whole words):           kw:review,audit,security',
+        '# Separate multiple triggers with YAML list:',
+        '#   triggers:',
+        '#     - review',
+        '#     - /security audit/i',
+        'triggers: []',
+        '# requiresContext: true   # Whether this workflow needs a domain context',
+        '---',
+        '',
+        `# ${name} Workflow`,
+        '',
+        '1. Step one',
+        '2. Step two',
+        '3. Step three',
+        '',
+      ].join('\n') + '\n',
     );
     console.log(`✅ Created domain/workflows/${name}/SKILL.md`);
   } else {

@@ -55,6 +55,7 @@ export interface RunService {
   list(): RunRecord[];
   stream(id: string, createSse: CreateSseResponseFn, res: unknown): void;
   cancel(id: string): boolean;
+  delete(id: string): boolean;
   finish(id: string, status: 'succeeded' | 'failed' | 'cancelled', error?: string): void;
   /** Signal a child process (SIGTERM) for a run. */
   signalChild(id: string, signal: NodeJS.Signals): boolean;
@@ -165,6 +166,23 @@ export function createRunService(options: CreateRunServiceOptions): RunService {
         return false;
       }
       service.finish(id, 'cancelled', 'Run cancelled by user');
+      return true;
+    },
+
+    delete(id) {
+      const run = state.runs.get(id);
+      if (!run) return false;
+      // End any active SSE listeners for this run
+      const listeners = state.listeners.get(id);
+      if (listeners) {
+        for (const sse of listeners) {
+          sse.send('end', { code: 0, status: 'deleted' });
+          sse.end();
+        }
+        state.listeners.delete(id);
+      }
+      state.runs.delete(id);
+      state.children.delete(id);
       return true;
     },
 

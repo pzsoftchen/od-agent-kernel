@@ -357,6 +357,14 @@ export function createChatRouter(options: ChatRouterOptions): Router {
     run ? res.json(run) : res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Run not found' } });
   });
 
+  router.delete('/api/runs/:id', (req, res) => {
+    if (runs.delete(req.params.id!)) {
+      res.json({ ok: true });
+    } else {
+      res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Run not found' } });
+    }
+  });
+
   router.get('/api/runs/:id/events', (req, res) => {
     const run = runs.get(req.params.id!);
     if (!run) { res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Run not found' } }); return; }

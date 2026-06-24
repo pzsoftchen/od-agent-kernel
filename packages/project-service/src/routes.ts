@@ -61,4 +61,19 @@ export function registerProjectRoutes(app: Express, service: ProjectService): vo
     }
     res.json({ ok: true });
   });
+
+  // GET /api/projects/:id/files — list project files
+  app.get('/api/projects/:id/files', (req: Request, res: Response) => {
+    const project = service.get(String(req.params.id));
+    if (!project) {
+      res.status(404).json({
+        error: { code: 'NOT_FOUND', message: 'Project not found' },
+      });
+      return;
+    }
+    const files = typeof service.listFiles === 'function'
+      ? service.listFiles(String(req.params.id))
+      : [];
+    res.json({ projectId: project.id, files });
+  });
 }

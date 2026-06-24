@@ -67,6 +67,15 @@ export {
 // Invocation
 export { execAgentFile, type ExecAgentFileResult } from './invocation.js';
 
+// Terminal launch
+export {
+  launchAgentInSystemTerminal,
+  type TerminalLaunchResult,
+} from './terminal-launch.js';
+
+// Binary resolution (for route handlers)
+export { resolveAgentBin } from './resolution.js';
+
 // Orchestrator
 export {
   createAgentOrchestrator,

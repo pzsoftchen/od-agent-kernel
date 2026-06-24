@@ -10,12 +10,15 @@ export interface CreateAppOptions {
   jsonLimit?: string;
   /** Optional Bearer token for API authentication. */
   authToken?: string;
+  /** Enable CORS headers for /api/* routes (default true). */
+  cors?: boolean;
 }
 
 export function createApp(options: CreateAppOptions = {}): Express {
   const app = express();
   const jsonLimit = options.jsonLimit ?? '4mb';
   const authToken = options.authToken;
+  const cors = options.cors ?? true;
 
   // JSON body parser
   app.use(express.json({ limit: jsonLimit }));
@@ -36,13 +39,15 @@ export function createApp(options: CreateAppOptions = {}): Express {
     });
   }
 
-  // CORS for /api/*
-  app.use('/api/*', (_req, res, next) => {
-    res.header('Access-Control-Allow-Origin', '*');
-    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
-    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-    next();
-  });
+  // CORS for /api/* (configurable)
+  if (cors) {
+    app.use('/api/*', (_req, res, next) => {
+      res.header('Access-Control-Allow-Origin', '*');
+      res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+      res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+      next();
+    });
+  }
 
   // CSP header
   app.use((_req, res, next) => {

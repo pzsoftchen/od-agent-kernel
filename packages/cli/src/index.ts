@@ -44,4 +44,48 @@ program
     await addCommand(type, name);
   });
 
+program
+  .command('templates')
+  .description('List available project templates')
+  .action(() => {
+    console.log('Available templates:');
+    console.log('  minimal         — Empty domain files, start from scratch');
+    console.log('  code-review     — Security-focused code review setup');
+    console.log('  legal-review     — Contract and legal document review');
+    console.log('  data-analysis   — Data analysis and visualization');
+    console.log('');
+    console.log('Usage: npx @od-kernel/cli init my-app --template <name>');
+  });
+
+program
+  .command('agents')
+  .description('List available agents on this system')
+  .action(async () => {
+    try {
+      const { createAgentOrchestrator } = await import('@od-kernel/agent-runtime');
+      const orchestrator = createAgentOrchestrator();
+      const agents = await orchestrator.listAgents();
+      console.log('Agent detection results:');
+      console.log('');
+      for (const agent of agents) {
+        const status = agent.available ? '✅ available' : '❌ unavailable';
+        const version = agent.version ? ` (${agent.version})` : '';
+        console.log(`  ${agent.name.padEnd(20)} ${status}${version}`);
+        if (agent.authStatus) {
+          console.log(`    auth: ${agent.authStatus}`);
+        }
+        if (agent.diagnostics?.length) {
+          for (const d of agent.diagnostics) {
+            console.log(`    ⚠️  ${d.message}`);
+          }
+        }
+      }
+      console.log('');
+      console.log(`${agents.filter(a => a.available).length}/${agents.length} agents available`);
+    } catch (err) {
+      console.error('Failed to detect agents:', err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    }
+  });
+
 program.parse(process.argv);

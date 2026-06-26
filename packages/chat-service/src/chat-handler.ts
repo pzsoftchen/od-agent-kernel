@@ -246,6 +246,12 @@ export function createChatRouter(options: ChatRouterOptions): Router {
           }
 
           sse.end();
+        } else {
+          // Run was removed between create and stream (TTL/concurrent delete).
+          // Without this the request hangs with no response.
+          if (!res.headersSent) {
+            res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: 'Failed to attach SSE stream' } });
+          }
         }
       } else {
         // ---- Echo mode (no orchestrator — test/development) ----
@@ -259,13 +265,21 @@ export function createChatRouter(options: ChatRouterOptions): Router {
           runs.finish(run.id, 'succeeded');
           sse.send('end', { code: 0, status: 'succeeded' });
           sse.end();
+        } else {
+          if (!res.headersSent) {
+            res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: 'Failed to attach SSE stream' } });
+          }
         }
       }
     } catch (err) {
-      // Catch-all for unexpected errors (e.g. runs.create fails)
+      // Catch-all for unexpected errors (e.g. runs.create fails). Don't expose
+      // the raw message (may contain filesystem paths / internal details) —
+      // log it server-side and return a generic message, matching the
+      // composePrompt error handler above.
       const msg = err instanceof Error ? err.message : String(err);
+      console.error('[chat-service] unexpected error:', msg);
       if (!res.headersSent) {
-        res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: msg } });
+        res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: 'Internal server error' } });
       }
     }
   });
@@ -411,6 +425,11 @@ export function createChatRouter(options: ChatRouterOptions): Router {
 
   router.delete('/api/runs/:id', (req, res) => {
     if (runs.delete(req.params.id!)) {
+      // Also stop the agent subprocess — runs.delete only removes the record
+      // and SSE listeners, so without this a running run's child is orphaned.
+      if (orchestrator) {
+        orchestrator.cancel(req.params.id!).catch(() => {});
+      }
       res.json({ ok: true });
     } else {
       res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Run not found' } });

@@ -79,6 +79,16 @@ describe('createRunService', () => {
     expect(service.cancel(run.id)).toBe(false);
   });
 
+  it('refuses to cancel a failed run (preserves failure reason)', () => {
+    const run = service.create('claude', '/tmp');
+    service.start(run.id);
+    service.finish(run.id, 'failed', 'Agent crashed');
+    expect(service.cancel(run.id)).toBe(false);
+    // Status + error must be unchanged — not overwritten with "cancelled".
+    expect(service.get(run.id)?.status).toBe('failed');
+    expect(service.get(run.id)?.error).toBe('Agent crashed');
+  });
+
   it('lists all runs', () => {
     const r1 = service.create('claude', '/tmp/a');
     const r2 = service.create('copilot', '/tmp/b');

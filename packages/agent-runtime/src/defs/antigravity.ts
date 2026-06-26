@@ -77,13 +77,37 @@ export function writeAntigravityModelSelection(
 // `Propagating selected model override to backend: label="<X>"` in
 // its `--log-file` (which is the upstream signal that settings.json
 // has been read).
+//
+// Safety net: if a release never fires — e.g. the daemon crashed
+// between acquire and wiring the child-exit release, or a caller
+// branch skipped release — the chain would otherwise hang forever and
+// every subsequent antigravity spawn would `await previous` eternally,
+// permanently poisoning that agent. A worst-case deadline auto-releases
+// the lock so a single stuck run can't take the agent offline.
 let antigravityLockChain: Promise<void> = Promise.resolve();
 
-export async function acquireAntigravityModelLock(): Promise<() => void> {
+// Upper bound a holder can keep the lock. Well above the
+// waitForAgyToReadModel 15s poll + realistic cold-start agy read time.
+const ANTIGRAVITY_LOCK_MAX_HOLD_MS = 60_000;
+
+export async function acquireAntigravityModelLock(
+  maxHoldMs: number = ANTIGRAVITY_LOCK_MAX_HOLD_MS,
+): Promise<() => void> {
   const previous = antigravityLockChain;
   let release: () => void = () => {};
+  let safetyTimer: ReturnType<typeof setTimeout> | null = null;
   antigravityLockChain = new Promise<void>((resolve) => {
-    release = resolve;
+    release = () => {
+      if (safetyTimer) {
+        clearTimeout(safetyTimer);
+        safetyTimer = null;
+      }
+      resolve();
+    };
+    // If the caller never invokes release(), auto-release so the chain
+    // (and every future acquire) doesn't hang permanently.
+    safetyTimer = setTimeout(() => resolve(), maxHoldMs);
+    if (typeof safetyTimer.unref === 'function') safetyTimer.unref();
   });
   await previous;
   return release;

@@ -116,6 +116,14 @@ export const codexAgentDef = {
       // back to a coarse policy that rejects any shell. macOS (Seatbelt)
       // and Linux (Landlock+seccomp) keep workspace-write because their
       // sandbox enforcement permits shell while restricting writes.
+      // codexNeedsDangerFullAccessSandbox() and the OD_CODEX_DISABLE_PLUGINS
+      // check below read process.env. This is safe in the kernel: the
+      // orchestrator builds the spawn env as { ...process.env, ...def.env,
+      // ...configuredEnv } (orchestrator.ts), so process.env is always the
+      // base. A downstream consumer that filters the spawn env must keep
+      // these vars (WSL_DISTRO_NAME, OD_CODEX_*, OD_CODEX_SANDBOX) or thread
+      // them in explicitly — buildArgs has no env parameter today by design,
+      // matching all 24 defs' signature.
       const needsDangerFullAccess = codexNeedsDangerFullAccessSandbox();
       const args = needsDangerFullAccess
         ? ['exec', '--json', '--skip-git-repo-check', '--sandbox', 'danger-full-access']
@@ -146,8 +154,14 @@ export const codexAgentDef = {
       if (options.reasoning && options.reasoning !== 'default') {
         const effort = clampCodexReasoning(options.model ?? '', options.reasoning);
         // Codex accepts `-c key=value` config overrides; reasoning effort
-        // is exposed as `model_reasoning_effort`.
-        args.push('-c', `model_reasoning_effort="${effort}"`);
+        // is exposed as `model_reasoning_effort`. clampCodexReasoning returns
+        // undefined for values Codex doesn't accept via this key
+        // (none/minimal/xhigh) — skip the override entirely rather than
+        // emitting the literal string "undefined", which Codex would treat
+        // as a real (and invalid) effort level.
+        if (effort) {
+          args.push('-c', `model_reasoning_effort="${effort}"`);
+        }
       }
       return args;
     },

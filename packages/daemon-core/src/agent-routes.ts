@@ -9,6 +9,7 @@
 import type { Express, Request, Response } from 'express';
 import type { AgentOrchestrator } from '@od-kernel/agent-runtime';
 import {
+  getAgentDef,
   launchAgentInSystemTerminal,
   resolveAgentBin,
 } from '@od-kernel/agent-runtime';
@@ -46,6 +47,18 @@ export function registerAgentRoutes(
       if (!agentId) {
         res.status(400).json({
           error: { code: 'BAD_REQUEST', message: 'agent ID is required' },
+        });
+        return;
+      }
+
+      // Allowlist: only known agent IDs may be launched in a system terminal.
+      // resolveAgentBin returns null for unknown IDs, which would otherwise
+      // fall through to `command = agentId` and hand a raw, attacker-controlled
+      // string to the shell-executing terminal launcher — a command-injection
+      // vector. Reject before we reach launchAgentInSystemTerminal.
+      if (!getAgentDef(agentId)) {
+        res.status(400).json({
+          error: { code: 'BAD_REQUEST', message: `Unknown agent ID: ${agentId}` },
         });
         return;
       }

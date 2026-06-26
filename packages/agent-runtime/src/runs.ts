@@ -162,7 +162,14 @@ export function createRunService(options: CreateRunServiceOptions): RunService {
 
     cancel(id) {
       const run = state.runs.get(id);
-      if (!run || run.status === 'succeeded' || run.status === 'cancelled') {
+      // Don't overwrite a terminal state. Allowing a `failed` run to be
+      // re-finished as `cancelled` would discard the original failure reason.
+      if (
+        !run ||
+        run.status === 'succeeded' ||
+        run.status === 'cancelled' ||
+        run.status === 'failed'
+      ) {
         return false;
       }
       service.finish(id, 'cancelled', 'Run cancelled by user');

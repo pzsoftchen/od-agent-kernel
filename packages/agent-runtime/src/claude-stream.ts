@@ -357,7 +357,18 @@ export function createClaudeStreamHandler(
         onEvent({ type: 'raw', line });
         continue;
       }
-      handleObject(obj);
+      // handleObject runs outside the JSON.parse catch — wrap it so an
+      // unexpected event shape surfaces as an error event instead of
+      // escaping to the stdout 'data' handler and crashing/hanging the
+      // daemon (the 'data' callback has no try/catch around handler.feed).
+      try {
+        handleObject(obj);
+      } catch (err) {
+        onEvent({
+          type: 'error',
+          message: `claude stream parse error: ${err instanceof Error ? err.message : String(err)}`,
+        });
+      }
     }
   }
 

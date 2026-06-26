@@ -51,7 +51,8 @@ The kernel. Provides:
   `listModels`, `fetchModels`, `streamFormat`, `eventParser`, etc.
 - **Detection** (`detection.ts`) — probes agent binaries for availability,
   version, auth status, capabilities, and live model lists. Probes run in
-  parallel within one agent and sequentially across agents.
+  parallel both within one agent and across agents (all probed concurrently
+  via `Promise.all`; `detectAgentsStream` yields each in completion order).
 - **Orchestrator** (`orchestrator.ts`) — the main entry point: spawns the
   agent subprocess, attaches a stream parser, and yields unified `AgentEvent`s.
 - **Stream parsers** — `claude-stream.ts` (Claude Code stream-json),

@@ -53,9 +53,10 @@ export function createApp(options: CreateAppOptions = {}): Express {
     });
   }
 
-  // CSP header
+  // CSP header — API server serves JSON/SSE only (no inline scripts), so
+  // 'unsafe-inline' is dropped to keep any future HTML endpoint XSS-resistant.
   app.use((_req, res, next) => {
-    res.header('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline'");
+    res.header('Content-Security-Policy', "default-src 'self'; script-src 'self'; object-src 'none'; base-uri 'self'");
     next();
   });
 

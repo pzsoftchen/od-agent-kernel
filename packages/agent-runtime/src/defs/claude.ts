@@ -9,6 +9,7 @@ import {
   DEFAULT_MODEL_OPTION,
   execAgentFile,
   detectAcpModels,
+  parseLineSeparatedModels,
 } from './shared.js';
 import type { RuntimeAgentDef } from '../types.js';
 
@@ -54,14 +55,7 @@ export const claudeAgentDef: RuntimeAgentDef = {
   listModels: {
     args: ['--list-models'],
     timeoutMs: 15_000,
-    parse(stdout) {
-      const lines = stdout
-        .split('\n')
-        .map((l) => l.trim())
-        .filter(Boolean);
-      if (lines.length === 0) return null;
-      return lines.map((id) => ({ id, label: id }));
-    },
+    parse: parseLineSeparatedModels,
   },
   fetchModels: async (_resolvedBin, env) => loadMmdRouteModels(env, [
     DEFAULT_MODEL_OPTION,

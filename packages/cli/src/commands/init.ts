@@ -1,4 +1,4 @@
-import { mkdir, writeFile, cp } from 'node:fs/promises';
+import { mkdir, writeFile, cp, stat } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import path from 'node:path';
@@ -6,6 +6,30 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const execFileAsync = promisify(execFile);
+
+/**
+ * Resolve a template directory that works in every execution context:
+ *   - source (tests):      src/commands/init.ts   → ../templates/<name>
+ *   - bundled & inlined:   dist/index.mjs          → ./templates/<name>
+ *   - bundled & split:     dist/commands/init.mjs  → ../templates/<name>
+ * esbuild may inline this module into the top-level bundle or emit it as a
+ * chunk under dist/commands/, so the templates dir is sometimes a sibling
+ * and sometimes a parent. Try both and return the first that exists.
+ */
+async function resolveTemplateDir(template: string): Promise<string | null> {
+  const candidates = [
+    path.join(__dirname, 'templates', template),
+    path.join(__dirname, '..', 'templates', template),
+  ];
+  for (const candidate of candidates) {
+    try {
+      if ((await stat(candidate)).isDirectory()) return candidate;
+    } catch {
+      // not present — try next candidate
+    }
+  }
+  return null;
+}
 
 function validateName(name: string, label: string): void {
   if (!name || name !== name.trim()) {
@@ -25,12 +49,12 @@ export async function initCommand(name: string, options: { template?: string }):
   await mkdir(path.join(targetDir, 'domain', 'contexts'), { recursive: true });
   await mkdir(path.join(targetDir, 'domain', 'workflows'), { recursive: true });
 
-  // Copy template files
-  const templateDir = path.join(__dirname, '..', 'templates', template);
-  try {
+  // Copy template files (resolved across source / inlined / split layouts).
+  // If the template dir can't be found, fall through — the minimal prompts.md
+  // write below still produces a usable scaffold.
+  const templateDir = await resolveTemplateDir(template);
+  if (templateDir) {
     await cp(templateDir, path.join(targetDir, 'domain'), { recursive: true });
-  } catch {
-    // Template not found — create minimal default
   }
 
   // Create domain/prompts.md if not exists

@@ -818,11 +818,23 @@ export function createJsonEventStreamHandler(kind: ParserKind, onEvent: StreamEv
       return;
     }
 
-    if (kind === 'opencode' && handleOpenCodeEvent(obj, onEvent, state)) return;
-    if (kind === 'gemini' && handleGeminiEvent(obj, onEvent, state)) return;
-    if (kind === 'kimi' && handleKimiEvent(obj, onEvent)) return;
-    if (kind === 'cursor-agent' && handleCursorEvent(obj, onEvent, state)) return;
-    if (kind === 'codex' && handleCodexEvent(obj, onEvent, state)) return;
+    // Per-agent handlers run outside the JSON.parse catch. Wrap them so an
+    // unexpected event shape surfaces as an error event instead of escaping
+    // to the stdout 'data' handler and crashing/hanging the daemon (the
+    // 'data' callback has no try/catch around handler.feed).
+    try {
+      if (kind === 'opencode' && handleOpenCodeEvent(obj, onEvent, state)) return;
+      if (kind === 'gemini' && handleGeminiEvent(obj, onEvent, state)) return;
+      if (kind === 'kimi' && handleKimiEvent(obj, onEvent)) return;
+      if (kind === 'cursor-agent' && handleCursorEvent(obj, onEvent, state)) return;
+      if (kind === 'codex' && handleCodexEvent(obj, onEvent, state)) return;
+    } catch (err) {
+      onEvent({
+        type: 'error',
+        message: `${kind} stream parse error: ${err instanceof Error ? err.message : String(err)}`,
+      });
+      return;
+    }
 
     onEvent({ type: 'raw', line });
   }

@@ -19,6 +19,12 @@ export function createSseResponse(res: Response): SseSession {
     Connection: 'keep-alive',
     'X-Accel-Buffering': 'no',
   });
+  // Flush headers immediately so the client sees the 200 + SSE headers
+  // without waiting for the first event or the 15s keepalive. Without this,
+  // Node/proxies may buffer the headers until the first res.write().
+  if (typeof res.flushHeaders === 'function') {
+    res.flushHeaders();
+  }
 
   // Keepalive heartbeat (every 15 seconds)
   let keepaliveCleared = false;

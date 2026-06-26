@@ -263,6 +263,11 @@ export async function devCommand(options: { port?: string }): Promise<void> {
     watcher.on('change', handleDomainChange);
     watcher.on('add', handleDomainChange);
     watcher.on('unlink', handleDomainChange);
+    watcher.on('error', (err) => {
+      // Without this, a watch error (FSEvents exhaustion, network mount, etc.)
+      // is swallowed and hot-reload silently stops forever.
+      console.error(`[od-kernel] File watcher error: ${err instanceof Error ? err.message : String(err)}`);
+    });
 
     console.log(`[od-kernel] Watching ${path.relative(cwd, domainDir)} for changes...`);
 

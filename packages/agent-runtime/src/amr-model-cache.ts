@@ -33,7 +33,11 @@ function errorMessage(error: unknown): string {
 export class AmrModelLoadingCache {
   private readonly states = new Map<string, CacheState>();
 
-  constructor(private readonly refreshIntervalMs = DEFAULT_REMOTE_REFRESH_INTERVAL_MS) {}
+  constructor(
+    private readonly refreshIntervalMs = DEFAULT_REMOTE_REFRESH_INTERVAL_MS,
+    /** Max distinct cache keys retained before oldest entries are evicted. */
+    private readonly maxEntries = 64,
+  ) {}
 
   async get(cacheKey: string, fetchers: Fetchers): Promise<AmrModelsResponse> {
     const state = this.stateFor(cacheKey);
@@ -71,6 +75,15 @@ export class AmrModelLoadingCache {
   private stateFor(cacheKey: string): CacheState {
     const existing = this.states.get(cacheKey);
     if (existing) return existing;
+    // Bound the cache: evict the oldest entry (Map preserves insertion order)
+    // when at capacity so a long-lived daemon serving many projects/envs
+    // doesn't accumulate stale entries indefinitely.
+    if (this.states.size >= this.maxEntries) {
+      const oldest = this.states.keys().next();
+      if (!oldest.done) {
+        this.states.delete(oldest.value);
+      }
+    }
     const created: CacheState = {
       remote: null,
       inFlight: null,
